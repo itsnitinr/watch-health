@@ -4,8 +4,8 @@ import { connection } from "next/server";
 import { DailyLine, HeartRangeChart, TrendChart } from "@/components/dash/charts";
 import { Delta, EmptyHint, Panel, SegmentedLinks, StatTile } from "@/components/dash/primitives";
 import { PageBody, PageHeader } from "@/components/page-header";
-import { fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
-import { dailySampleStats, restingHeartRate } from "@/lib/queries";
+import { fillDays, restingHeartRate, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { dailySampleStats } from "@/lib/queries";
 
 export const metadata: Metadata = { title: "Heart & body" };
 
@@ -30,8 +30,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
   const range = { from: shiftDay(today, -(days - 1)), to: today };
   const prev = { from: shiftDay(range.from, -days), to: shiftDay(range.from, -1) };
 
-  const rhrData = restingHeartRate(range);
-  const rhr = fillDays(range, rhrData.rows, (r) => r.value);
+  const rhr = fillDays(range, restingHeartRate(range), (r) => r.value);
   const hrDaily = dailySampleStats("heart_rate", range);
   const hrv = fillDays(range, dailySampleStats("hrv_rmssd", range), (r) => r.avg);
   const spo2 = fillDays(range, dailySampleStats("spo2", range), (r) => r.avg);
@@ -41,7 +40,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
   const fat = fillDays(range, dailySampleStats("body_fat", range), (r) => r.avg);
   const has = (s: { value: number | null }[]) => s.some((p) => p.value != null);
 
-  const rhrPrev = mean(restingHeartRate(prev).rows.map((r) => r.value));
+  const rhrPrev = mean(restingHeartRate(prev).map((r) => r.value));
   const hrvPrev = mean(dailySampleStats("hrv_rmssd", prev).map((r) => r.avg));
   const spo2Prev = mean(dailySampleStats("spo2", prev).map((r) => r.avg));
   const weights = weight.filter((w) => w.value != null);
@@ -53,7 +52,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
     const r = rangeByDay.get(day);
     return { day, range: r ? [r.min, r.max] as [number, number] : null, resting: rhrByDay.get(day) ?? null };
   });
-  const restingLabel = rhrData.kind === "resting" ? "Resting heart rate" : "Lowest heart rate";
+  const restingLabel = "Resting heart rate";
 
   return (
     <>
@@ -83,7 +82,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel title={restingLabel} icon={HeartPulse} domain="heart"
-            description="Lower usually means better fitness and recovery. Short rises often follow poor sleep, alcohol, illness or hard training.">
+            description="Your lowest 30-minute average while asleep. Lower usually means better fitness and recovery; short rises often follow poor sleep, alcohol, illness or hard training.">
             {has(rhr) ? <TrendChart data={withRollingAvg(rhr)} label="bpm" color="var(--heart)" hrefPrefix="/day/" />
               : <EmptyHint icon={HeartPulse} title="No data" />}
           </Panel>

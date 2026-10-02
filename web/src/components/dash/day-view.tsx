@@ -36,7 +36,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   const week = recentSeries(day, 7);
   const n = d.night;
   const asleep = n ? n.asleep : null;
-  const rhr = d.restingHr.rows[0]?.value ?? null;
+  const rhr = d.restingHr;
   const exerciseMin = d.workouts.reduce((a, w) => a + (w.end_ms - w.start_ms) / 60000, 0);
   const maxHr = maxHeartRate().value;
   const restHr = baselineRestingHr();
@@ -48,7 +48,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   if (rhr != null && base.restingHr != null) {
     const diff = rhr - base.restingHr;
     signals.push({
-      name: d.restingHr.kind === "resting" ? "Resting heart rate" : "Lowest heart rate", icon: HeartPulse,
+      name: "Resting heart rate", icon: HeartPulse,
       value: `${Math.round(rhr)} bpm`,
       detail: Math.abs(diff) < 1 ? "Same as usual" : `${Math.abs(Math.round(diff))} ${diff > 0 ? "above" : "below"} your usual ${Math.round(base.restingHr)}`,
       status: diff <= -1 ? "good" : diff >= 3 ? "watch" : "ok",
@@ -182,7 +182,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             footer={<span className="text-xs text-muted-foreground">{d.workouts.length ? `${d.workouts.length} workout${d.workouts.length > 1 ? "s" : ""}` : "No workouts"}</span>}>
             <Sparkline values={week.exerciseMin.map((x) => x.value)} color="var(--exercise)" />
           </StatTile>
-          <StatTile label={d.restingHr.kind === "resting" ? "Resting heart rate" : "Lowest heart rate"} icon={HeartPulse} domain="heart"
+          <StatTile label="Resting heart rate" icon={HeartPulse} domain="heart"
             value={rhr != null ? Math.round(rhr) : "-"} unit="bpm" href="/heart"
             footer={<Delta value={rhr} reference={base.restingHr} upIsGood={false} format={(x) => `${Math.round(x)}`} threshold={0.015} />}>
             <Sparkline values={week.restingHr.map((x) => x.value)} color="var(--heart)" />

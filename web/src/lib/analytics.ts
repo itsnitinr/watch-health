@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { dailyMetric, dailySampleStats, listDays, restingHeartRate, sleepNights, type Range, type SleepNight } from "./queries";
+import { dailyMetric, dailySampleStats, listDays, sleepNights, type Range, type SleepNight } from "./queries";
 
 // node:sqlite rows have a null prototype; copy them into plain objects so they can be
 // passed to client components.
@@ -61,7 +61,7 @@ export function dataExtent() {
     `SELECT MIN(d) AS first, MAX(d) AS last FROM (
        SELECT MIN(day) AS d FROM daily_metrics UNION ALL SELECT MAX(day) FROM daily_metrics
        UNION ALL SELECT date(MIN(start_ms)/1000,'unixepoch','localtime') FROM sleep_sessions
-       UNION ALL SELECT date(MIN(start_ms)/1000,'unixepoch','localtime') FROM samples WHERE type = 'resting_heart_rate')`,
+       UNION ALL SELECT date(MIN(start_ms)/1000,'unixepoch','localtime') FROM samples WHERE type = 'heart_rate')`,
   );
   return r?.first ? { first: r.first, last: r.last! } : null;
 }
@@ -98,7 +98,7 @@ export function dayDetail(day: string) {
     active_kcal: metric("active_kcal"),
     total_kcal: metric("total_kcal"),
     floors: metric("floors"),
-    restingHr: restingHeartRate(r),
+    restingHr: restingHeartRate(r)[0]?.value ?? null,
     hrStats: sampleAvg("heart_rate"),
     hrv: sampleAvg("hrv_rmssd"),
     spo2: sampleAvg("spo2"),
@@ -138,19 +138,46 @@ const minutesAfter6pm = (ms: number) => {
  */
 const nightOf = (endMs: number) => localDay(endMs + 6 * 3600000);
 
+const NAP_MAX_MIN = 180;
+const SAME_NIGHT_GAP_MS = 2 * 3600000;
+
 /**
- * One row per night: every session belonging to the same morning merged into one. Naps (sessions
- * under 3h that start between 9:00 and 18:00) are left out. This is the single definition of a
- * night used by every page and the assistant, so they all agree.
+ * Which of a morning's sessions make up the night. A session is part of the night if it is long
+ * (3h+), overlaps the core hours (midnight to 6:00 of that morning), or lies within 2h of a
+ * session that is. Everything else (an afternoon nap, an evening doze hours before bed) is a nap.
+ */
+function nightSessions(day: string, sessions: SleepNight[]): SleepNight[] {
+  const coreStart = dayStartMs(day);
+  const coreEnd = coreStart + 6 * 3600000;
+  const kept = new Set(sessions.filter((x) =>
+    x.total_min >= NAP_MAX_MIN || (x.start_ms < coreEnd && x.end_ms > coreStart)));
+  for (let changed = kept.size > 0; changed;) {
+    changed = false;
+    for (const x of sessions) {
+      if (kept.has(x)) continue;
+      const near = [...kept].some((k) => Math.max(k.start_ms - x.end_ms, x.start_ms - k.end_ms) <= SAME_NIGHT_GAP_MS);
+      if (near) { kept.add(x); changed = true; }
+    }
+  }
+  return sessions.filter((x) => kept.has(x));
+}
+
+/**
+ * One row per night: every session belonging to the same morning merged into one, naps left out
+ * (see nightSessions). This is the single definition of a night used by every page and the
+ * assistant, so they all agree.
  */
 export function nights(r: Range): NightStats[] {
   const byDay = new Map<string, SleepNight[]>();
   for (const s of sleepNights({ from: shiftDay(r.from, -1), to: r.to })) {
     const day = nightOf(s.end_ms);
     if (day < r.from || day > r.to) continue;
-    const startHour = new Date(s.start_ms).getHours();
-    const nap = s.total_min < 180 && startHour >= 9 && startHour < 18;
-    if (!nap) byDay.set(day, [...(byDay.get(day) ?? []), s]);
+    byDay.set(day, [...(byDay.get(day) ?? []), s]);
+  }
+  for (const [day, sessions] of byDay) {
+    const kept = nightSessions(day, sessions);
+    if (kept.length) byDay.set(day, kept);
+    else byDay.delete(day);
   }
   return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, sessions]) => {
     const first = sessions[0];
@@ -178,6 +205,57 @@ export function nights(r: Range): NightStats[] {
       weekend: evening.getDay() === 5 || evening.getDay() === 6,
     };
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Resting heart rate
+
+const RHR_WINDOW_MS = 30 * 60000;
+const RHR_MIN_READINGS = 10;
+
+/**
+ * Lowest 30-minute average heart rate while asleep. Samsung Health doesn't share a resting heart
+ * rate with Health Connect, so it is derived the same way for every night from the watch's own
+ * overnight readings (about one a minute). Needing 10+ readings per window means a single
+ * glitchy low reading can't set it. Null when the night has too few readings.
+ */
+function nightRestingHr(n: NightStats): number | null {
+  const hr = intradayHeartRate(n.start_ms, n.end_ms);
+  let best: number | null = null;
+  let sum = 0;
+  let lo = 0;
+  for (let hi = 0; hi < hr.length; hi++) {
+    sum += hr[hi].bpm;
+    while (hr[hi].t - hr[lo].t > RHR_WINDOW_MS) sum -= hr[lo++].bpm;
+    const count = hi - lo + 1;
+    if (count >= RHR_MIN_READINGS) {
+      const avg = sum / count;
+      if (best == null || avg < best) best = avg;
+    }
+  }
+  return best == null ? null : Math.round(best * 10) / 10;
+}
+
+const rhrCache = new Map<string, number | null>();
+
+/**
+ * Resting heart rate per day, from the night that ended that morning. Cached per night; the key
+ * includes the night's end and session ids, so a night that grows after a later sync is recomputed.
+ * Today's value is never cached because heart-rate readings may still be arriving.
+ */
+export function restingHeartRate(r: Range): { day: string; value: number }[] {
+  const today = localDay(Date.now());
+  const out: { day: string; value: number }[] = [];
+  for (const n of nights(r)) {
+    const key = `${n.uids.join(",")}:${n.end_ms}`;
+    let v = rhrCache.get(key);
+    if (v === undefined) {
+      v = nightRestingHr(n);
+      if (n.day !== today) rhrCache.set(key, v);
+    }
+    if (v != null) out.push({ day: n.day, value: v });
+  }
+  return out;
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
@@ -261,7 +339,7 @@ export function maxHeartRate(): { value: number; source: "env" | "observed" | "d
 /** Typical resting HR (median of the last 60 days), used as the floor for training load. */
 export function baselineRestingHr() {
   const to = localDay(Date.now());
-  const vals = restingHeartRate({ from: shiftDay(to, -60), to }).rows.map((r) => r.value).sort((a, b) => a - b);
+  const vals = restingHeartRate({ from: shiftDay(to, -60), to }).map((r) => r.value).sort((a, b) => a - b);
   return vals.length ? vals[Math.floor(vals.length / 2)] : 60;
 }
 
@@ -358,9 +436,8 @@ export function personalBests() {
     href: longest ? wHref(longest.uid) : null, when: longest?.start_ms ?? null,
   });
 
-  const rhr = one<{ day: string; value: number }>(
-    `SELECT date(start_ms/1000,'unixepoch','localtime') AS day, value FROM samples WHERE type = 'resting_heart_rate' ORDER BY value ASC LIMIT 1`,
-  );
+  const rhr = restingHeartRate({ from: "2000-01-01", to: localDay(Date.now()) }).reduce<{ day: string; value: number } | null>(
+    (lo, x) => (lo == null || x.value < lo.value ? x : lo), null);
   bests.push({ label: "Lowest resting heart rate", value: rhr ? `${Math.round(rhr.value)} bpm` : null, href: rhr ? `/day/${rhr.day}` : null, when: rhr?.day ?? null });
 
   const sleep = one<{ end_ms: number; mins: number }>(
@@ -401,7 +478,7 @@ export function baselines(day: string) {
     distance_m: avgOf(dailyMetric("distance_m", r).map((x) => x.value)),
     active_kcal: avgOf(dailyMetric("active_kcal", r).map((x) => x.value)),
     asleep: avgOf(nights(r).map((n) => n.asleep)),
-    restingHr: avgOf(restingHeartRate(r).rows.map((x) => x.value)),
+    restingHr: avgOf(restingHeartRate(r).map((x) => x.value)),
     hrv: avgOf(dailySampleStats("hrv_rmssd", r).map((x) => x.avg)),
     spo2: avgOf(dailySampleStats("spo2", r).map((x) => x.avg)),
     weight: lastWeight?.value ?? null,
@@ -416,7 +493,7 @@ export function recentSeries(day: string, n = 7) {
     steps: fillDays(r, dailyMetric("steps", r), (x) => x.value),
     distance: fillDays(r, dailyMetric("distance_m", r), (x) => x.value),
     activeKcal: fillDays(r, dailyMetric("active_kcal", r), (x) => x.value),
-    restingHr: fillDays(r, restingHeartRate(r).rows, (x) => x.value),
+    restingHr: fillDays(r, restingHeartRate(r), (x) => x.value),
     hrv: fillDays(r, dailySampleStats("hrv_rmssd", r), (x) => x.avg),
     spo2: fillDays(r, dailySampleStats("spo2", r), (x) => x.avg),
     weight: fillDays(r, dailySampleStats("weight", r), (x) => x.avg),
@@ -436,7 +513,7 @@ export function dataDays(limitDays = 800) {
   return all<{ day: string }>(
     `SELECT day FROM daily_metrics WHERE day >= date(? / 1000, 'unixepoch', 'localtime')
      UNION SELECT date(end_ms / 1000, 'unixepoch', 'localtime') FROM sleep_sessions WHERE end_ms >= ?
-     UNION SELECT date(start_ms / 1000, 'unixepoch', 'localtime') FROM samples WHERE type IN ('resting_heart_rate', 'weight') AND start_ms >= ?`,
+     UNION SELECT date(start_ms / 1000, 'unixepoch', 'localtime') FROM samples WHERE type = 'weight' AND start_ms >= ?`,
     since, since, since,
   ).map((r) => r.day);
 }

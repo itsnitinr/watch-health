@@ -3,9 +3,9 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { getReadonlyDb } from "./db";
 import {
-  dailyMetric, dailySampleStats, dataCoverage, exercises, listDays, restingHeartRate,
+  dailyMetric, dailySampleStats, dataCoverage, exercises, listDays,
 } from "./queries";
-import { nights } from "./analytics";
+import { nights, restingHeartRate } from "./analytics";
 
 const MODEL = "claude-opus-5-5";
 const MAX_ROWS = 300;
@@ -15,8 +15,9 @@ Tables (SQLite). All *_ms columns are Unix epoch milliseconds (UTC). To bucket b
 date(start_ms / 1000, 'unixepoch', 'localtime').
 
 samples(uid, type, start_ms, end_ms, value, unit, source, meta JSON)
-  Point measurements. Common types: heart_rate (bpm, many per day), resting_heart_rate (bpm, ~1/day),
-  hrv_rmssd (ms), spo2 (%), weight (kg), body_fat (%), skeletal_muscle_mass (kg), respiratory_rate,
+  Point measurements. Common types: heart_rate (bpm, ~1/min, denser in workouts),
+  resting_heart_rate (from Google Fit, stops Jan 2026: do NOT use; get_daily_summary's resting_hr is the
+  consistent value), hrv_rmssd (ms, not shared by Samsung Health, so normally absent), spo2 (%), weight (kg), body_fat (%), skeletal_muscle_mass (kg), respiratory_rate,
   skin_temperature, stress, blood_pressure_systolic, blood_pressure_diastolic, vo2_max.
 daily_metrics(day 'YYYY-MM-DD' local, metric, value, source)
   Per-day totals, already de-duplicated across phone + watch: steps, distance_m, active_kcal, total_kcal, floors, active_min.
@@ -88,7 +89,7 @@ export const agentTools = [
       const r = { from, to };
       const index = <T extends { day: string }>(rows: T[]) => new Map(rows.map((x) => [x.day, x]));
       const steps = index(dailyMetric("steps", r));
-      const rhr = index(restingHeartRate(r).rows);
+      const rhr = index(restingHeartRate(r));
       const hrv = index(dailySampleStats("hrv_rmssd", r));
       const spo2 = index(dailySampleStats("spo2", r));
       const weight = index(dailySampleStats("weight", r));
@@ -122,7 +123,7 @@ export const agentTools = [
           workouts: workouts.get(day)?.join("; ") ?? null,
         };
       });
-      return JSON.stringify({ resting_hr_source: restingHeartRate(r).kind, rows });
+      return JSON.stringify({ resting_hr_definition: "lowest 30-minute average heart rate while asleep, from the night ending that morning", rows });
     },
   }),
 

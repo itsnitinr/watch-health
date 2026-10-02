@@ -40,23 +40,21 @@ export function dailyMetric(metric: string, r: Range) {
 }
 
 /** Daily avg/min/max of a sample type (heart_rate, spo2, weight, hrv_rmssd, ...). */
-export function dailySampleStats(type: string, r: Range) {
-  return all<{ day: string; avg: number; min: number; max: number; n: number }>(
-    `SELECT ${LOCAL_DAY("start_ms")} AS day, AVG(value) AS avg, MIN(value) AS min, MAX(value) AS max, COUNT(*) AS n
-     FROM samples WHERE type = ? AND ${LOCAL_DAY("start_ms")} BETWEEN ? AND ?
-     GROUP BY day ORDER BY day`,
-    type, r.from, r.to,
-  );
+/** Epoch-ms bounds of a range of local dates, so queries can use the (type, start_ms) index. */
+function msBounds({ from, to }: Range) {
+  const end = new Date(`${to}T00:00:00`);
+  end.setDate(end.getDate() + 1);
+  return [new Date(`${from}T00:00:00`).getTime(), end.getTime()] as const;
 }
 
-/**
- * Resting heart rate per day. Health Connect provides it directly; the Samsung CSV
- * export doesn't, so fall back to the day's lowest recorded heart rate.
- */
-export function restingHeartRate(r: Range) {
-  const resting = dailySampleStats("resting_heart_rate", r);
-  if (resting.length > 0) return { kind: "resting" as const, rows: resting.map((x) => ({ day: x.day, value: x.avg })) };
-  return { kind: "lowest" as const, rows: dailySampleStats("heart_rate", r).map((x) => ({ day: x.day, value: x.min })) };
+export function dailySampleStats(type: string, r: Range) {
+  const [fromMs, toMs] = msBounds(r);
+  return all<{ day: string; avg: number; min: number; max: number; n: number }>(
+    `SELECT ${LOCAL_DAY("start_ms")} AS day, AVG(value) AS avg, MIN(value) AS min, MAX(value) AS max, COUNT(*) AS n
+     FROM samples WHERE type = ? AND start_ms >= ? AND start_ms < ?
+     GROUP BY day ORDER BY day`,
+    type, fromMs, toMs,
+  );
 }
 
 export type SleepNight = {
