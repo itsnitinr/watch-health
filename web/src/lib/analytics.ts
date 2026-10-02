@@ -1,0 +1,451 @@
+import { getDb } from "./db";
+import { dailyMetric, dailySampleStats, listDays, restingHeartRate, sleepNights, type Range, type SleepNight } from "./queries";
+
+// node:sqlite rows have a null prototype; copy them into plain objects so they can be
+// passed to client components.
+const all = <T>(sql: string, ...params: (string | number)[]) =>
+  getDb().prepare(sql).all(...params).map((r) => ({ ...r })) as unknown as T[];
+const one = <T>(sql: string, ...params: (string | number)[]) => {
+  const r = getDb().prepare(sql).get(...params);
+  return (r ? { ...r } : undefined) as unknown as T | undefined;
+};
+
+/** Local midnight of a YYYY-MM-DD date, as epoch ms (server runs in the user's timezone). */
+export const dayStartMs = (day: string) => new Date(`${day}T00:00:00`).getTime();
+export const localDay = (ms: number) => new Date(ms).toLocaleDateString("sv");
+/** Current local date and time; pages call these after `connection()`, so they run per request. */
+export const todayLocal = () => localDay(Date.now());
+export const nowMs = () => Date.now();
+export const shiftDay = (day: string, n: number) => {
+  const d = new Date(`${day}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString("sv");
+};
+
+export const SLEEP_GOAL_MIN = Number(process.env.SLEEP_GOAL_HOURS ?? 8) * 60;
+
+// ---------------------------------------------------------------------------------------------
+// Series helpers
+
+/** Trailing mean over the last `window` days that have data (nulls are skipped, not zeroed). */
+export function withRollingAvg(series: { day: string; value: number | null }[], window = 7) {
+  return series.map((p, i) => {
+    const vals = series.slice(Math.max(0, i - window + 1), i + 1).map((x) => x.value).filter((v): v is number => v != null);
+    return { ...p, avg: vals.length >= Math.min(3, window) ? vals.reduce((a, b) => a + b, 0) / vals.length : null };
+  });
+}
+
+/** Mean per ISO week (keyed by the week's Monday) or per month (keyed YYYY-MM-01). */
+export function bucketAvg(series: { day: string; value: number | null }[], by: "week" | "month") {
+  const buckets = new Map<string, number[]>();
+  for (const p of series) {
+    if (p.value == null) continue;
+    const d = new Date(`${p.day}T12:00:00`);
+    if (by === "week") d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    else d.setDate(1);
+    const key = d.toLocaleDateString("sv");
+    buckets.set(key, [...(buckets.get(key) ?? []), p.value]);
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, vs]) => ({ day, value: vs.reduce((a, b) => a + b, 0) / vs.length, n: vs.length }));
+}
+
+export function fillDays<T extends { day: string }>(range: Range, rows: T[], pick: (r: T) => number | null) {
+  const m = new Map(rows.map((r) => [r.day, pick(r)]));
+  return listDays(range).map((day) => ({ day, value: m.get(day) ?? null }));
+}
+
+export function dataExtent() {
+  const r = one<{ first: string | null; last: string | null }>(
+    `SELECT MIN(d) AS first, MAX(d) AS last FROM (
+       SELECT MIN(day) AS d FROM daily_metrics UNION ALL SELECT MAX(day) FROM daily_metrics
+       UNION ALL SELECT date(MIN(start_ms)/1000,'unixepoch','localtime') FROM sleep_sessions
+       UNION ALL SELECT date(MIN(start_ms)/1000,'unixepoch','localtime') FROM samples WHERE type = 'resting_heart_rate')`,
+  );
+  return r?.first ? { first: r.first, last: r.last! } : null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Day drill-down
+
+export function intradayHeartRate(fromMs: number, toMs: number) {
+  return all<{ t: number; bpm: number }>(
+    `SELECT start_ms AS t, value AS bpm FROM samples
+     WHERE type = 'heart_rate' AND start_ms >= ? AND start_ms < ? ORDER BY start_ms`,
+    fromMs, toMs,
+  );
+}
+
+export function sleepStages(sessionUid: string) {
+  return all<{ stage: string; start_ms: number; end_ms: number }>(
+    `SELECT stage, start_ms, end_ms FROM sleep_stages WHERE session_uid = ? ORDER BY start_ms`,
+    sessionUid,
+  );
+}
+
+export function dayDetail(day: string) {
+  const r = { from: day, to: day };
+  const start = dayStartMs(day);
+  const end = dayStartMs(shiftDay(day, 1));
+  const metric = (m: string) => dailyMetric(m, r)[0]?.value ?? null;
+  const sampleAvg = (t: string) => dailySampleStats(t, r)[0] ?? null;
+  const night = nights(r).at(-1) ?? null;
+
+  return {
+    steps: metric("steps"),
+    distance_m: metric("distance_m"),
+    active_kcal: metric("active_kcal"),
+    total_kcal: metric("total_kcal"),
+    floors: metric("floors"),
+    restingHr: restingHeartRate(r),
+    hrStats: sampleAvg("heart_rate"),
+    hrv: sampleAvg("hrv_rmssd"),
+    spo2: sampleAvg("spo2"),
+    weight: sampleAvg("weight"),
+    night,
+    stages: night ? night.uids.flatMap(sleepStages).sort((a, b) => a.start_ms - b.start_ms) : [],
+    // From the previous evening (when last night's sleep started) to the end of this day
+    hr: intradayHeartRate(night ? Math.min(night.start_ms, start) : start, end),
+    workouts: workoutsBetween(start, end),
+    start,
+    end,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sleep
+
+export type NightStats = SleepNight & {
+  uids: string[]; // the sessions merged into this night
+  asleep: number;
+  efficiency: number;
+  bedMin: number; // minutes after 18:00 on the evening the night started
+  wakeMin: number;
+  weekend: boolean; // Friday or Saturday night
+};
+
+const minutesAfter6pm = (ms: number) => {
+  const d = new Date(ms);
+  const m = d.getHours() * 60 + d.getMinutes();
+  return (m < 18 * 60 ? m + 24 * 60 : m) - 18 * 60;
+};
+
+/**
+ * The morning a sleep session belongs to. Samsung Health often splits one night into several
+ * sessions when you wake briefly; shifting by 6h puts a session that ends late in the evening
+ * (e.g. 22:30 to 23:50, before waking again after midnight) with the rest of that night.
+ */
+const nightOf = (endMs: number) => localDay(endMs + 6 * 3600000);
+
+/**
+ * One row per night: every session belonging to the same morning merged into one. Naps (sessions
+ * under 3h that start between 9:00 and 18:00) are left out. This is the single definition of a
+ * night used by every page and the assistant, so they all agree.
+ */
+export function nights(r: Range): NightStats[] {
+  const byDay = new Map<string, SleepNight[]>();
+  for (const s of sleepNights({ from: shiftDay(r.from, -1), to: r.to })) {
+    const day = nightOf(s.end_ms);
+    if (day < r.from || day > r.to) continue;
+    const startHour = new Date(s.start_ms).getHours();
+    const nap = s.total_min < 180 && startHour >= 9 && startHour < 18;
+    if (!nap) byDay.set(day, [...(byDay.get(day) ?? []), s]);
+  }
+  return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, sessions]) => {
+    const first = sessions[0];
+    const last = sessions.at(-1)!;
+    const sum = (k: "deep" | "rem" | "light" | "awake" | "total_min") => sessions.reduce((a, s) => a + s[k], 0);
+    const inBed = (last.end_ms - first.start_ms) / 60000;
+    // Time asleep comes from the sessions themselves, so gaps between sessions don't count as sleep
+    const asleep = sum("total_min") - sum("awake");
+    const evening = new Date(first.start_ms - 12 * 3600000); // bedtime after midnight still counts as previous evening
+    return {
+      ...first,
+      day,
+      uids: sessions.map((x) => x.uid),
+      end_ms: last.end_ms,
+      total_min: inBed,
+      deep: sum("deep"),
+      rem: sum("rem"),
+      light: sum("light"),
+      awake: sum("awake"),
+      score: sessions.find((x) => x.score != null)?.score ?? null,
+      asleep,
+      efficiency: inBed > 0 ? asleep / inBed : 0,
+      bedMin: minutesAfter6pm(first.start_ms),
+      wakeMin: minutesAfter6pm(last.end_ms),
+      weekend: evening.getDay() === 5 || evening.getDay() === 6,
+    };
+  });
+}
+
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const stdev = (xs: number[]) => {
+  const m = mean(xs);
+  return m == null || xs.length < 2 ? null : Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1));
+};
+
+export function sleepSummary(ns: NightStats[]) {
+  const pick = (f: (n: NightStats) => number, xs = ns) => mean(xs.map(f));
+  const withStages = ns.filter((n) => n.deep + n.rem + n.light > 0);
+  const stageTotal = withStages.reduce((a, n) => a + n.deep + n.rem + n.light, 0);
+  const last14 = ns.slice(-14);
+  const group = (xs: NightStats[]) => ({
+    nights: xs.length,
+    asleep: pick((n) => n.asleep, xs),
+    bedMin: pick((n) => n.bedMin, xs),
+    wakeMin: pick((n) => n.wakeMin, xs),
+    efficiency: pick((n) => n.efficiency, xs),
+    score: mean(xs.filter((n) => n.score != null).map((n) => n.score!)),
+  });
+  return {
+    count: ns.length,
+    asleep: pick((n) => n.asleep),
+    inBed: pick((n) => n.total_min),
+    efficiency: pick((n) => n.efficiency),
+    score: mean(ns.filter((n) => n.score != null).map((n) => n.score!)),
+    bedMin: pick((n) => n.bedMin),
+    wakeMin: pick((n) => n.wakeMin),
+    bedStdev: stdev(ns.map((n) => n.bedMin)),
+    wakeStdev: stdev(ns.map((n) => n.wakeMin)),
+    stagePct: stageTotal
+      ? {
+          deep: withStages.reduce((a, n) => a + n.deep, 0) / stageTotal,
+          rem: withStages.reduce((a, n) => a + n.rem, 0) / stageTotal,
+          light: withStages.reduce((a, n) => a + n.light, 0) / stageTotal,
+        }
+      : null,
+    /** Net shortfall against the goal over the last 14 nights (surplus nights pay some back). */
+    debtMin: Math.max(0, last14.reduce((a, n) => a + (SLEEP_GOAL_MIN - n.asleep), 0)),
+    debtNights: last14.length,
+    weekday: group(ns.filter((n) => !n.weekend)),
+    weekend: group(ns.filter((n) => n.weekend)),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Workouts & heart
+
+export type Workout = {
+  uid: string; type: string; title: string | null; start_ms: number; end_ms: number;
+  kcal: number | null; distance_m: number | null; avg_hr: number | null; max_hr: number | null;
+};
+
+export function workoutsBetween(fromMs: number, toMs: number) {
+  return all<Workout>(
+    `SELECT uid, type, title, start_ms, end_ms, kcal, distance_m, avg_hr, max_hr FROM exercise_sessions
+     WHERE start_ms >= ? AND start_ms < ? ORDER BY start_ms DESC`,
+    fromMs, toMs,
+  );
+}
+
+export function workout(uid: string) {
+  return one<Workout>(
+    `SELECT uid, type, title, start_ms, end_ms, kcal, distance_m, avg_hr, max_hr FROM exercise_sessions WHERE uid = ?`,
+    uid,
+  );
+}
+
+/**
+ * Max heart rate for zones: MAX_HR from the environment, else the highest workout max HR on
+ * record (ignoring implausible spikes), else 190.
+ */
+export function maxHeartRate(): { value: number; source: "env" | "observed" | "default" } {
+  const env = Number(process.env.MAX_HR);
+  if (env > 0) return { value: env, source: "env" };
+  const r = one<{ m: number | null }>(`SELECT MAX(max_hr) AS m FROM exercise_sessions WHERE max_hr BETWEEN 120 AND 220`);
+  return r?.m ? { value: r.m, source: "observed" } : { value: 190, source: "default" };
+}
+
+/** Typical resting HR (median of the last 60 days), used as the floor for training load. */
+export function baselineRestingHr() {
+  const to = localDay(Date.now());
+  const vals = restingHeartRate({ from: shiftDay(to, -60), to }).rows.map((r) => r.value).sort((a, b) => a - b);
+  return vals.length ? vals[Math.floor(vals.length / 2)] : 60;
+}
+
+export const ZONES = [
+  { zone: 1, label: "Zone 1", name: "Very light", lo: 0, hi: 0.6 },
+  { zone: 2, label: "Zone 2", name: "Light", lo: 0.6, hi: 0.7 },
+  { zone: 3, label: "Zone 3", name: "Moderate", lo: 0.7, hi: 0.8 },
+  { zone: 4, label: "Zone 4", name: "Hard", lo: 0.8, hi: 0.9 },
+  { zone: 5, label: "Zone 5", name: "Maximum", lo: 0.9, hi: Infinity },
+] as const;
+
+export function zoneLabels(maxHr: number) {
+  return ZONES.map((z) => ({
+    label: z.label,
+    name: z.name,
+    range: z.lo === 0 ? `< ${Math.round(z.hi * maxHr)} bpm` : z.hi === Infinity ? `≥ ${Math.round(z.lo * maxHr)} bpm` : `${Math.round(z.lo * maxHr)}-${Math.round(z.hi * maxHr) - 1} bpm`,
+  }));
+}
+
+/** Seconds in each zone. Each reading counts until the next one, capped at 60s to bridge gaps. */
+export function timeInZones(hr: { t: number; bpm: number }[], endMs: number, maxHr: number) {
+  const secs = [0, 0, 0, 0, 0];
+  hr.forEach((p, i) => {
+    const next = hr[i + 1]?.t ?? endMs;
+    const dur = Math.min(60, Math.max(0, (next - p.t) / 1000));
+    const frac = p.bpm / maxHr;
+    const z = ZONES.findIndex((zz) => frac >= zz.lo && frac < zz.hi);
+    if (z >= 0) secs[z] += dur;
+  });
+  return secs;
+}
+
+/** Banister TRIMP: minutes × intensity, weighted exponentially so hard efforts count more. */
+export function trainingLoad(w: Workout, maxHr: number, restHr: number) {
+  if (!w.avg_hr || maxHr <= restHr) return null;
+  const hrr = Math.min(1, Math.max(0, (w.avg_hr - restHr) / (maxHr - restHr)));
+  const minutes = (w.end_ms - w.start_ms) / 60000;
+  return minutes * hrr * 0.64 * Math.exp(1.92 * hrr);
+}
+
+export function workoutsWithZones(fromMs: number, toMs: number, maxHr: number) {
+  const ws = workoutsBetween(fromMs, toMs);
+  const totals = [0, 0, 0, 0, 0];
+  const perWorkout = new Map<string, number[]>();
+  for (const w of ws) {
+    const z = timeInZones(intradayHeartRate(w.start_ms, w.end_ms), w.end_ms, maxHr);
+    perWorkout.set(w.uid, z);
+    z.forEach((s, i) => (totals[i] += s));
+  }
+  return { workouts: ws, totals, perWorkout };
+}
+
+export function weeklyLoad(ws: Workout[], maxHr: number, restHr: number) {
+  const weeks = new Map<string, { load: number; minutes: number; count: number }>();
+  for (const w of ws) {
+    const d = new Date(w.start_ms);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const key = d.toLocaleDateString("sv");
+    const cur = weeks.get(key) ?? { load: 0, minutes: 0, count: 0 };
+    cur.load += trainingLoad(w, maxHr, restHr) ?? 0;
+    cur.minutes += (w.end_ms - w.start_ms) / 60000;
+    cur.count++;
+    weeks.set(key, cur);
+  }
+  return weeks;
+}
+
+export function personalBests() {
+  type Best = { label: string; value: string | null; href: string | null; when: number | string | null };
+  const fmtKm = (m: number) => `${(m / 1000).toFixed(2)} km`;
+  const pace = (ms: number, m: number) => {
+    const secPerKm = ms / 1000 / (m / 1000);
+    return `${Math.floor(secPerKm / 60)}:${String(Math.round(secPerKm % 60)).padStart(2, "0")} /km`;
+  };
+  const wHref = (uid: string) => `/workouts/${encodeURIComponent(uid)}`;
+  const bests: Best[] = [];
+
+  const steps = one<{ day: string; value: number }>(`SELECT day, value FROM daily_metrics WHERE metric = 'steps' ORDER BY value DESC LIMIT 1`);
+  bests.push({ label: "Most steps in a day", value: steps ? Math.round(steps.value).toLocaleString() : null, href: steps ? `/day/${steps.day}` : null, when: steps?.day ?? null });
+
+  const longRun = one<Workout>(`SELECT * FROM exercise_sessions WHERE type = 'running' AND distance_m > 0 ORDER BY distance_m DESC LIMIT 1`);
+  bests.push({ label: "Longest run", value: longRun ? fmtKm(longRun.distance_m!) : null, href: longRun ? wHref(longRun.uid) : null, when: longRun?.start_ms ?? null });
+
+  const fastRun = one<Workout>(
+    `SELECT * FROM exercise_sessions WHERE type = 'running' AND distance_m >= 5000
+     ORDER BY (end_ms - start_ms) * 1.0 / distance_m ASC LIMIT 1`,
+  );
+  bests.push({ label: "Fastest pace (runs ≥ 5 km)", value: fastRun ? pace(fastRun.end_ms - fastRun.start_ms, fastRun.distance_m!) : null, href: fastRun ? wHref(fastRun.uid) : null, when: fastRun?.start_ms ?? null });
+
+  const longest = one<Workout>(`SELECT * FROM exercise_sessions ORDER BY end_ms - start_ms DESC LIMIT 1`);
+  bests.push({
+    label: "Longest workout",
+    value: longest ? `${Math.round((longest.end_ms - longest.start_ms) / 60000)} min ${longest.type.replaceAll("_", " ")}` : null,
+    href: longest ? wHref(longest.uid) : null, when: longest?.start_ms ?? null,
+  });
+
+  const rhr = one<{ day: string; value: number }>(
+    `SELECT date(start_ms/1000,'unixepoch','localtime') AS day, value FROM samples WHERE type = 'resting_heart_rate' ORDER BY value ASC LIMIT 1`,
+  );
+  bests.push({ label: "Lowest resting heart rate", value: rhr ? `${Math.round(rhr.value)} bpm` : null, href: rhr ? `/day/${rhr.day}` : null, when: rhr?.day ?? null });
+
+  const sleep = one<{ end_ms: number; mins: number }>(
+    `SELECT s.end_ms, ((s.end_ms - s.start_ms) - COALESCE(SUM(CASE WHEN st.stage IN ('awake','out_of_bed') THEN st.end_ms - st.start_ms END), 0)) / 60000.0 AS mins
+     FROM sleep_sessions s LEFT JOIN sleep_stages st ON st.session_uid = s.uid GROUP BY s.uid ORDER BY mins DESC LIMIT 1`,
+  );
+  bests.push({
+    label: "Longest sleep",
+    value: sleep ? `${Math.floor(sleep.mins / 60)}h ${String(Math.round(sleep.mins % 60)).padStart(2, "0")}m` : null,
+    href: sleep ? `/day/${localDay(sleep.end_ms)}` : null, when: sleep ? localDay(sleep.end_ms) : null,
+  });
+
+  return bests;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Today view
+
+export const GOALS = {
+  steps: Number(process.env.STEPS_GOAL ?? 10000),
+  sleepMin: SLEEP_GOAL_MIN,
+  exerciseMin: Number(process.env.EXERCISE_GOAL_MIN ?? 30),
+};
+
+const avgOf = (xs: (number | null | undefined)[]) => {
+  const v = xs.filter((x): x is number => x != null);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+
+/** Your usual values: averages over the 30 days before `day` (the day itself excluded). */
+export function baselines(day: string) {
+  const r = { from: shiftDay(day, -30), to: shiftDay(day, -1) };
+  const lastWeight = one<{ value: number }>(
+    `SELECT value FROM samples WHERE type = 'weight' AND start_ms < ? ORDER BY start_ms DESC LIMIT 1`, dayStartMs(day),
+  );
+  return {
+    steps: avgOf(dailyMetric("steps", r).map((x) => x.value)),
+    distance_m: avgOf(dailyMetric("distance_m", r).map((x) => x.value)),
+    active_kcal: avgOf(dailyMetric("active_kcal", r).map((x) => x.value)),
+    asleep: avgOf(nights(r).map((n) => n.asleep)),
+    restingHr: avgOf(restingHeartRate(r).rows.map((x) => x.value)),
+    hrv: avgOf(dailySampleStats("hrv_rmssd", r).map((x) => x.avg)),
+    spo2: avgOf(dailySampleStats("spo2", r).map((x) => x.avg)),
+    weight: lastWeight?.value ?? null,
+  };
+}
+
+/** Values for the `n` days ending on `day`, for sparklines and the week strip. */
+export function recentSeries(day: string, n = 7) {
+  const r = { from: shiftDay(day, -(n - 1)), to: day };
+  return {
+    days: listDays(r),
+    steps: fillDays(r, dailyMetric("steps", r), (x) => x.value),
+    distance: fillDays(r, dailyMetric("distance_m", r), (x) => x.value),
+    activeKcal: fillDays(r, dailyMetric("active_kcal", r), (x) => x.value),
+    restingHr: fillDays(r, restingHeartRate(r).rows, (x) => x.value),
+    hrv: fillDays(r, dailySampleStats("hrv_rmssd", r), (x) => x.avg),
+    spo2: fillDays(r, dailySampleStats("spo2", r), (x) => x.avg),
+    weight: fillDays(r, dailySampleStats("weight", r), (x) => x.avg),
+    nights: nights(r),
+    exerciseMin: fillDays(r,
+      listDays(r).map((d) => ({
+        day: d,
+        min: workoutsBetween(dayStartMs(d), dayStartMs(shiftDay(d, 1))).reduce((a, w) => a + (w.end_ms - w.start_ms) / 60000, 0),
+      })),
+      (x) => x.min),
+  };
+}
+
+/** Days (local dates) that have any data, for the date picker. */
+export function dataDays(limitDays = 800) {
+  const since = Date.now() - limitDays * 86400000;
+  return all<{ day: string }>(
+    `SELECT day FROM daily_metrics WHERE day >= date(? / 1000, 'unixepoch', 'localtime')
+     UNION SELECT date(end_ms / 1000, 'unixepoch', 'localtime') FROM sleep_sessions WHERE end_ms >= ?
+     UNION SELECT date(start_ms / 1000, 'unixepoch', 'localtime') FROM samples WHERE type IN ('resting_heart_rate', 'weight') AND start_ms >= ?`,
+    since, since, since,
+  ).map((r) => r.day);
+}
+
+export function latestDataDay() {
+  return one<{ day: string | null }>(
+    `SELECT MAX(d) AS day FROM (
+       SELECT MAX(day) AS d FROM daily_metrics
+       UNION ALL SELECT date(MAX(end_ms) / 1000, 'unixepoch', 'localtime') FROM sleep_sessions
+       UNION ALL SELECT date(MAX(start_ms) / 1000, 'unixepoch', 'localtime') FROM samples)`,
+  )?.day ?? null;
+}

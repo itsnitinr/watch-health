@@ -1,0 +1,217 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Theme: neutral zinc surfaces, colour reserved for data.
+ * Each health area has one identity colour (always paired with an icon + label):
+ *   activity = orange, sleep = violet, exercise = aqua, heart = red, body = blue.
+ * The three ring colours (activity / sleep / exercise) are validated together for
+ * colour-blind separation in both themes; sleep stages, heart-rate zones and the
+ * activity calendar use validated single-hue ramps. Dark values are selected
+ * separately for the dark surface, not inverted.
+ */
+:root {
+  color-scheme: light;
+  --radius: 0.75rem;
+
+  --background: #f4f4f5;
+  --foreground: #18181b;
+  --card: #fdfdfd;
+  --card-foreground: #18181b;
+  --popover: #fdfdfd;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #ececee;
+  --secondary-foreground: #18181b;
+  --muted: #ececee;
+  --muted-foreground: #63636b;
+  --accent: #ececee;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --border: #e3e3e6;
+  --input: #dcdce0;
+  --ring: #a1a1aa;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #3f3f46;
+  --sidebar-primary: #18181b;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #ececee;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e3e3e6;
+  --sidebar-ring: #a1a1aa;
+
+  /* Chart chrome */
+  --chart-grid: #e8e8eb;
+  --chart-axis: #c9c9cf;
+  --chart-ink: #71717a;
+
+  /* Health areas */
+  --activity: #eb6834;
+  --sleep: #4a3aa7;
+  --exercise: #1baf7a;
+  --heart: #e34948;
+  --body: #2a78d6;
+
+  --good: #15803d;
+  --bad: #dc2626;
+  --warn: #b45309;
+
+  /* Sleep stages, deep → light (ordinal violet) + neutral awake */
+  --stage-deep: #33278a;
+  --stage-rem: #6b5fd6;
+  --stage-light: #a99ff0;
+  --stage-awake: #d4d4d8;
+
+  /* Heart-rate zones 1 → 5 (ordinal red) */
+  --z1: #ef968d;
+  --z2: #e8695f;
+  --z3: #d63c3b;
+  --z4: #a92a2a;
+  --z5: #7a1b1c;
+
+  /* Activity calendar, low → high (sequential orange) */
+  --heat-1: #fbd9c9;
+  --heat-2: #f6a882;
+  --heat-3: #eb6834;
+  --heat-4: #b9461b;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0f0f11;
+  --foreground: #f4f4f5;
+  --card: #18181b;
+  --card-foreground: #f4f4f5;
+  --popover: #1c1c20;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #18181b;
+  --secondary: #26262b;
+  --secondary-foreground: #f4f4f5;
+  --muted: #26262b;
+  --muted-foreground: #a1a1aa;
+  --accent: #26262b;
+  --accent-foreground: #f4f4f5;
+  --destructive: #f87171;
+  --border: #2a2a30;
+  --input: #34343b;
+  --ring: #52525b;
+  --sidebar: #131316;
+  --sidebar-foreground: #d4d4d8;
+  --sidebar-primary: #f4f4f5;
+  --sidebar-primary-foreground: #18181b;
+  --sidebar-accent: #222227;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #24242a;
+  --sidebar-ring: #52525b;
+
+  --chart-grid: #26262b;
+  --chart-axis: #3a3a41;
+  --chart-ink: #8b8b94;
+
+  --activity: #d95926;
+  --sleep: #9085e9;
+  --exercise: #199e70;
+  --heart: #e66767;
+  --body: #3987e5;
+
+  --good: #22c55e;
+  --bad: #f87171;
+  --warn: #f59e0b;
+
+  --stage-deep: #b3abf5;
+  --stage-rem: #7268dd;
+  --stage-light: #4a3cae;
+  --stage-awake: #4b4b52;
+
+  --z1: #9a2a2a;
+  --z2: #c23636;
+  --z3: #e05a55;
+  --z4: #ef8c84;
+  --z5: #f7c0ba;
+
+  --heat-1: #5a2410;
+  --heat-2: #973f19;
+  --heat-3: #d95926;
+  --heat-4: #f39a72;
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-activity: var(--activity);
+  --color-sleep: var(--sleep);
+  --color-exercise: var(--exercise);
+  --color-heart: var(--heart);
+  --color-body: var(--body);
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Markdown in assistant answers */
+.prose-chat { line-height: 1.65; }
+.prose-chat > * + * { margin-top: 0.75em; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin-top: 1.25em; }
+.prose-chat ul { list-style: disc; padding-left: 1.25em; }
+.prose-chat ol { list-style: decimal; padding-left: 1.25em; }
+.prose-chat li + li { margin-top: 0.25em; }
+.prose-chat strong { font-weight: 600; }
+.prose-chat code { font-family: var(--font-mono), ui-monospace, monospace; font-size: 0.9em; }
+.prose-chat table { border-collapse: collapse; font-variant-numeric: tabular-nums; display: block; overflow-x: auto; font-size: 0.9em; }
+.prose-chat th, .prose-chat td { border-bottom: 1px solid var(--border); padding: 0.4em 1em 0.4em 0; text-align: left; }
+.prose-chat th { color: var(--muted-foreground); font-weight: 500; }
