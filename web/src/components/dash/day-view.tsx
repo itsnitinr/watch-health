@@ -120,7 +120,8 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             <Sparkline values={week.steps.map((x) => x.value)} color="var(--activity)" />
           </StatTile>
           <StatTile label="Distance" icon={Route} domain="activity" value={d.distance_m != null ? (d.distance_m / 1000).toFixed(1) : "-"} unit="km" href="/activity"
-            footer={<Delta value={d.distance_m} reference={base.distance_m} upIsGood format={(x) => `${(x / 1000).toFixed(1)} km`} />}>
+            footer={<Delta value={d.distance_m} reference={base.distance_m} upIsGood format={(x) => `${(x / 1000).toFixed(1)} km`}
+              suffix={d.distanceEstimated ? "vs usual · from steps" : "vs usual"} />}>
             <Sparkline values={week.distance.map((x) => x.value)} color="var(--activity)" />
           </StatTile>
           <StatTile label="Active calories" icon={Flame} domain="activity" value={d.active_kcal != null ? fmtNum(d.active_kcal) : "-"} unit="kcal" href="/activity"
@@ -201,10 +202,11 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             <DailyColumns data={week.steps} label="steps" color="var(--activity)" goal={GOALS.steps} hrefPrefix="/day/" height={170} highlight={day} />
           </Panel>
 
-          <Panel title={d.workouts.length ? "Workouts" : "Recent workouts"} icon={Dumbbell} domain="exercise"
+          <Panel title={d.workouts.some((w) => !w.auto) ? "Workouts" : "Recent workouts"} icon={Dumbbell} domain="exercise"
             action={<PanelLink href="/workouts">All</PanelLink>}>
             {(() => {
-              const list = d.workouts.length ? d.workouts : recentWorkouts(week.days);
+              const own = d.workouts.filter((w) => !w.auto);
+              const list = own.length ? own : recentWorkouts(week.days);
               if (!list.length) return <EmptyHint icon={Dumbbell} title="No workouts this week" />;
               return (
                 <ul className="-mx-2 space-y-1">
@@ -254,5 +256,5 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
 }
 
 function recentWorkouts(days: string[]) {
-  return workoutsBetween(dayStartMs(days[0]), dayStartMs(shiftDay(days.at(-1)!, 1)));
+  return workoutsBetween(dayStartMs(days[0]), dayStartMs(shiftDay(days.at(-1)!, 1)), { includeAuto: false });
 }

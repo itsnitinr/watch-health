@@ -60,8 +60,14 @@ sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
 | **Ask** `/chat` | The assistant (below) |
 
 Light, dark or system theme from the sidebar. Optional settings in `.env.local`: `STEPS_GOAL`,
-`SLEEP_GOAL_HOURS`, `EXERCISE_GOAL_MIN` (ring goals) and `MAX_HR` (heart-rate zones; default is the
-highest HR recorded in a workout).
+`SLEEP_GOAL_HOURS`, `EXERCISE_GOAL_MIN` (ring goals), `MAX_HR` (heart-rate zones; default is the
+highest HR recorded in a workout) and `HEIGHT_CM` (stride length for distance).
+
+Samsung Health only shares workout distance with Health Connect, so daily distance is the larger
+of that and steps × stride (0.415 × height, or 0.76 m). Workouts the watch detected on its own
+(short walks and "other" activities) are hidden on the Workouts page by default; they still count
+as exercise. The Android app sends each workout's recording method; tap **Re-sync all history**
+once after updating the app so older workouts get it too.
 
 ## The assistant
 

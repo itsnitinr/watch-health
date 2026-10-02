@@ -68,6 +68,29 @@ export function dataExtent() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Distance
+
+/**
+ * Walking stride length in metres: 0.415 x height when HEIGHT_CM is set (a standard estimate),
+ * otherwise 0.76 m, a typical adult stride.
+ */
+export const STRIDE_M = Number(process.env.HEIGHT_CM) > 0 ? (Number(process.env.HEIGHT_CM) * 0.415) / 100 : 0.76;
+
+/**
+ * Daily distance. Samsung Health only shares workout distance with Health Connect, not all-day
+ * walking, so the recorded figure is often far below what the steps imply. Use whichever is
+ * larger: the recorded distance, or steps x stride. `estimated` marks days where steps won.
+ */
+export function dailyDistance(r: Range) {
+  const recorded = new Map(dailyMetric("distance_m", r).map((x) => [x.day, x.value]));
+  return dailyMetric("steps", r).map(({ day, value: steps }) => {
+    const fromSteps = steps * STRIDE_M;
+    const rec = recorded.get(day) ?? 0;
+    return { day, value: Math.max(rec, fromSteps), estimated: fromSteps > rec };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Day drill-down
 
 export function intradayHeartRate(fromMs: number, toMs: number) {
@@ -95,7 +118,8 @@ export function dayDetail(day: string) {
 
   return {
     steps: metric("steps"),
-    distance_m: metric("distance_m"),
+    distance_m: dailyDistance(r)[0]?.value ?? null,
+    distanceEstimated: dailyDistance(r)[0]?.estimated ?? false,
     active_kcal: metric("active_kcal"),
     total_kcal: metric("total_kcal"),
     floors: metric("floors"),
@@ -338,19 +362,33 @@ export function sleepSummary(ns: NightStats[]) {
 export type Workout = {
   uid: string; type: string; title: string | null; start_ms: number; end_ms: number;
   kcal: number | null; distance_m: number | null; avg_hr: number | null; max_hr: number | null;
+  auto: 0 | 1; // detected automatically by the watch rather than started by you
 };
 
-export function workoutsBetween(fromMs: number, toMs: number) {
+/**
+ * Whether a workout was detected automatically. Health Connect's recording method says so
+ * directly (2 = automatic, 1 = started on the watch, 3 = entered by hand); the phone app sends
+ * it from now on. Older rows don't have it, so short walks and "other" activities, which is what
+ * Samsung auto-detects, are treated as automatic.
+ */
+const WORKOUT_COLS = `uid, type, title, start_ms, end_ms, kcal, distance_m, avg_hr, max_hr,
+  CASE json_extract(meta, '$.recording_method')
+    WHEN 2 THEN 1 WHEN 1 THEN 0 WHEN 3 THEN 0
+    ELSE (type IN ('walking', 'other_0') AND end_ms - start_ms < 45 * 60000)
+  END AS auto`;
+
+/** Workouts starting in [fromMs, toMs), newest first. Auto-detected ones only when asked. */
+export function workoutsBetween(fromMs: number, toMs: number, { includeAuto = true } = {}) {
   return all<Workout>(
-    `SELECT uid, type, title, start_ms, end_ms, kcal, distance_m, avg_hr, max_hr FROM exercise_sessions
+    `SELECT ${WORKOUT_COLS} FROM exercise_sessions
      WHERE start_ms >= ? AND start_ms < ? ORDER BY start_ms DESC`,
     fromMs, toMs,
-  );
+  ).filter((w) => includeAuto || !w.auto);
 }
 
 export function workout(uid: string) {
   return one<Workout>(
-    `SELECT uid, type, title, start_ms, end_ms, kcal, distance_m, avg_hr, max_hr FROM exercise_sessions WHERE uid = ?`,
+    `SELECT ${WORKOUT_COLS} FROM exercise_sessions WHERE uid = ?`,
     uid,
   );
 }
@@ -410,8 +448,8 @@ export function trainingLoad(w: Workout, maxHr: number, restHr: number) {
   return minutes * hrr * 0.64 * Math.exp(1.92 * hrr);
 }
 
-export function workoutsWithZones(fromMs: number, toMs: number, maxHr: number) {
-  const ws = workoutsBetween(fromMs, toMs);
+export function workoutsWithZones(fromMs: number, toMs: number, maxHr: number, includeAuto = true) {
+  const ws = workoutsBetween(fromMs, toMs, { includeAuto });
   const totals = [0, 0, 0, 0, 0];
   const perWorkout = new Map<string, number[]>();
   for (const w of ws) {
@@ -505,7 +543,7 @@ export function baselines(day: string) {
   );
   return {
     steps: avgOf(dailyMetric("steps", r).map((x) => x.value)),
-    distance_m: avgOf(dailyMetric("distance_m", r).map((x) => x.value)),
+    distance_m: avgOf(dailyDistance(r).map((x) => x.value)),
     active_kcal: avgOf(dailyMetric("active_kcal", r).map((x) => x.value)),
     asleep: avgOf(nights(r).map((n) => n.asleep)),
     restingHr: avgOf(restingHeartRate(r).map((x) => x.value)),
@@ -520,7 +558,7 @@ export function recentSeries(day: string, n = 7) {
   return {
     days: listDays(r),
     steps: fillDays(r, dailyMetric("steps", r), (x) => x.value),
-    distance: fillDays(r, dailyMetric("distance_m", r), (x) => x.value),
+    distance: fillDays(r, dailyDistance(r), (x) => x.value),
     activeKcal: fillDays(r, dailyMetric("active_kcal", r), (x) => x.value),
     restingHr: fillDays(r, restingHeartRate(r), (x) => x.value),
     spo2: fillDays(r, dailySampleStats("spo2", r), (x) => x.avg),

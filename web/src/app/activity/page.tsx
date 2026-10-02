@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { CalendarHeatmap, DailyColumns, TrendChart } from "@/components/dash/charts";
 import { Delta, EmptyHint, Panel, SegmentedLinks, StatTile } from "@/components/dash/primitives";
 import { PageBody, PageHeader } from "@/components/page-header";
-import { GOALS, bucketAvg, dailyScores, dataExtent, fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { GOALS, STRIDE_M, bucketAvg, dailyDistance, dailyScores, dataExtent, fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
 import { ScoreHelp } from "@/components/dash/score";
 import { SCORE_HELP } from "@/lib/scores";
 import { fmtDay, fmtNum, fmtPeriod } from "@/lib/format";
@@ -46,10 +46,10 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
   const prev = { from: shiftDay(range.from, -days), to: shiftDay(range.from, -1) };
 
   const steps = fillDays(range, dailyMetric("steps", range), (r) => r.value);
-  const distance = fillDays(range, dailyMetric("distance_m", range), (r) => r.value);
+  const distance = fillDays(range, dailyDistance(range), (r) => r.value);
   const active = fillDays(range, dailyMetric("active_kcal", range), (r) => r.value);
   const prevSteps = dailyMetric("steps", prev).map((r) => r.value);
-  const prevDist = dailyMetric("distance_m", prev).map((r) => r.value);
+  const prevDist = dailyDistance(prev).map((r) => r.value);
   const prevActive = dailyMetric("active_kcal", prev).map((r) => r.value);
 
   const recorded = steps.filter((s) => s.value != null);
@@ -141,7 +141,8 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
             </Panel>
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <Panel title="Distance" icon={Route} domain="activity" description="Kilometres a day">
+              <Panel title="Distance" icon={Route} domain="activity"
+                description={`Kilometres a day. Samsung only shares workout distance, so walking is estimated from steps (${STRIDE_M.toFixed(2)} m a step; set HEIGHT_CM for a better estimate).`}>
                 <TrendChart data={withRollingAvg(distance.map((d) => ({ day: d.day, value: d.value != null ? d.value / 1000 : null })))}
                   label="km" color="var(--activity)" digits={1} hrefPrefix="/day/" />
               </Panel>

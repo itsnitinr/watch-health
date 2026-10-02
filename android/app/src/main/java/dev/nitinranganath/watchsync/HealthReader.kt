@@ -186,7 +186,9 @@ class HealthReader(private val client: HealthConnectClient) {
                             .put("distance_m", stats.distanceM ?: JSONObject.NULL)
                             .put("avg_hr", stats.avgHr ?: JSONObject.NULL)
                             .put("max_hr", stats.maxHr ?: JSONObject.NULL)
-                            .put("source", r.metadata.dataOrigin.packageName),
+                            .put("source", r.metadata.dataOrigin.packageName)
+                            // 1 = started by the user, 2 = detected automatically, 3 = entered by hand
+                            .put("meta", JSONObject().put("recording_method", r.metadata.recordingMethod)),
                     )
                 }
             }

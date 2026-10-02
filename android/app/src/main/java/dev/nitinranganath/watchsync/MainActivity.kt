@@ -145,12 +145,23 @@ private fun SyncScreen() {
         OutlinedButton(onClick = { permissionLauncher.launch(wanted) }) { Text("Grant access") }
 
         Text("3. Sync", style = MaterialTheme.typography.titleMedium)
-        Button(enabled = !busy, onClick = {
-            settings.serverUrl = url
-            settings.token = token
-            if (needsLocalNetworkPermission(context)) localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
-            else startSync()
-        }) { Text(if (busy) "Syncing…" else "Sync now") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy, onClick = {
+                settings.serverUrl = url
+                settings.token = token
+                if (needsLocalNetworkPermission(context)) localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                else startSync()
+            }) { Text(if (busy) "Syncing…" else "Sync now") }
+            // Reads everything again (up to a year), e.g. to fill in details added in a newer app version.
+            // Uploads are upserts, so nothing is duplicated.
+            OutlinedButton(enabled = !busy, onClick = {
+                settings.serverUrl = url
+                settings.token = token
+                settings.lastSyncMs = 0
+                if (needsLocalNetworkPermission(context)) localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                else startSync()
+            }) { Text("Re-sync all history") }
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Switch(checked = autoSync, onCheckedChange = {

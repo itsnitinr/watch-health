@@ -7,7 +7,7 @@ import { EmptyHint, IconChip, Panel, SegmentedLinks, StatTile } from "@/componen
 import { PageBody, PageHeader } from "@/components/page-header";
 import {
   baselineRestingHr, bucketAvg, dayStartMs, localDay, maxHeartRate, personalBests, shiftDay, todayLocal, trainingLoad,
-  weeklyLoad, workoutsWithZones, zoneLabels,
+  weeklyLoad, workoutsBetween, workoutsWithZones, zoneLabels,
 } from "@/lib/analytics";
 import { fmtDay, fmtMinutes, fmtNum, fmtPace, titleCase } from "@/lib/format";
 import { listDays } from "@/lib/queries";
@@ -25,12 +25,16 @@ export default async function WorkoutsPage({ searchParams }: PageProps<"/workout
   await connection();
   const sp = await searchParams;
   const rangeKey = RANGES.find((r) => r.value === sp.range)?.value ?? "90";
+  const showAuto = sp.auto === "1";
+  const href = (o: { range?: string; auto?: boolean }) => `/workouts?range=${o.range ?? rangeKey}${(o.auto ?? showAuto) ? "&auto=1" : ""}`;
   const today = todayLocal();
   const range = { from: shiftDay(today, -(Number(rangeKey) - 1)), to: today };
 
   const max = maxHeartRate();
   const restHr = baselineRestingHr();
-  const { workouts, totals } = workoutsWithZones(dayStartMs(range.from), dayStartMs(shiftDay(today, 1)), max.value);
+  const { workouts, totals } = workoutsWithZones(dayStartMs(range.from), dayStartMs(shiftDay(today, 1)), max.value, showAuto);
+  const autoCount = showAuto ? workouts.filter((w) => w.auto).length
+    : workoutsBetween(dayStartMs(range.from), dayStartMs(shiftDay(today, 1))).filter((w) => w.auto).length;
   const loads = new Map(workouts.map((w) => [w.uid, trainingLoad(w, max.value, restHr)]));
   const weeks = weeklyLoad(workouts, max.value, restHr);
   const weekKeys = bucketAvg(listDays(range).map((day) => ({ day, value: 0 })), "week").map((w) => w.day);
@@ -55,9 +59,18 @@ export default async function WorkoutsPage({ searchParams }: PageProps<"/workout
   return (
     <>
       <PageHeader title="Workouts" subtitle="Training volume, intensity and personal bests">
-        <SegmentedLinks options={RANGES} current={rangeKey} href={(v) => `/workouts?range=${v}`} />
+        <SegmentedLinks options={[{ value: "0", label: "Workouts" }, { value: "1", label: "Include auto-detected" }]}
+          current={showAuto ? "1" : "0"} href={(v) => href({ auto: v === "1" })} />
+        <SegmentedLinks options={RANGES} current={rangeKey} href={(v) => href({ range: v })} />
       </PageHeader>
       <PageBody>
+        {autoCount > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {showAuto
+              ? `Including ${autoCount} walks and activities your watch detected automatically.`
+              : `${autoCount} walks and activities your watch detected automatically are hidden. They still count towards your exercise minutes and Activity score.`}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatTile label="Workouts" icon={Dumbbell} domain="exercise" value={workouts.length}
             footer={<span className="text-xs text-muted-foreground">{(workouts.length / nWeeks).toFixed(1)} a week</span>} />
@@ -129,7 +142,9 @@ export default async function WorkoutsPage({ searchParams }: PageProps<"/workout
                       <Link href={`/workouts/${encodeURIComponent(w.uid)}`} className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted">
                         <IconChip icon={Dumbbell} domain="exercise" size="sm" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{w.title ?? titleCase(w.type)}</div>
+                          <div className="truncate text-sm font-medium">{w.title ?? titleCase(w.type)}
+                            {w.auto ? <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">auto</span> : null}
+                          </div>
                           <div className="text-xs text-muted-foreground">{fmtDay(localDay(w.start_ms))}</div>
                         </div>
                         <div className="tabular hidden w-20 text-right text-sm sm:block">{fmtMinutes((w.end_ms - w.start_ms) / 60000)}</div>
