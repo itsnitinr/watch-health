@@ -5,7 +5,7 @@ import { getReadonlyDb } from "./db";
 import {
   dailyMetric, dailySampleStats, dataCoverage, exercises, listDays,
 } from "./queries";
-import { nights, restingHeartRate } from "./analytics";
+import { dailyScores, nights, restingHeartRate } from "./analytics";
 
 const MODEL = "claude-opus-5-5";
 const MAX_ROWS = 300;
@@ -43,6 +43,13 @@ How to work:
 - Give practical, personalised suggestions tied to what the data shows. You are not a doctor; if something
   looks medically concerning (e.g. persistently low SpO2, unusual resting HR changes), say so plainly and suggest
   checking with a clinician, without alarmism.
+- The dashboard shows three 0-100 scores (85+ excellent, 70-84 good, 55-69 fair, <55 low), all in get_daily_summary:
+  sleep_score (duration 35%, efficiency 15%, deep 15%, REM 15%, bedtime regularity 20%),
+  energy_score, a morning readiness estimate (last night's sleep 30%, resting HR vs 30-day usual 25%, 7-night sleep
+  balance 15%, recovery from training load 20%, bedtime consistency 10%; energy_parts lists each part's sub-score),
+  activity_score (steps 60%, 7-day exercise vs 150 min 30%, exercise today 10%). A resting HR 5+ bpm above usual caps
+  the energy score. Note many "workouts" are Samsung's auto-detected walks (type walking / other_0, ~10-20 min). Use energy_parts to explain why a
+  score is high or low. There is no HRV: Samsung Health doesn't share it.
 - Be concise. Lead with the answer, then the supporting numbers. Use short markdown tables for multi-day data.`;
 
 function localDate(d = new Date()) {
@@ -94,6 +101,7 @@ export const agentTools = [
       const spo2 = index(dailySampleStats("spo2", r));
       const weight = index(dailySampleStats("weight", r));
       const sleep = new Map(nights(r).map((n) => [n.day, n]));
+      const scores = dailyScores(r);
       const workouts = new Map<string, string[]>();
       for (const w of exercises(r)) {
         const day = localDate(new Date(w.start_ms));
@@ -114,6 +122,9 @@ export const agentTools = [
           sleep_awake_min: n ? Math.round(n.awake) : null,
           sleep_sessions: n ? n.uids.length : null,
           sleep_score: n?.score ?? null,
+          energy_score: scores.get(day)?.energy.score ?? null,
+          energy_parts: scores.get(day)?.energy.parts.map((p) => `${p.label} ${p.score ?? "n/a"}`).join(", ") ?? null,
+          activity_score: scores.get(day)?.activity.score ?? null,
           bedtime: n ? new Date(n.start_ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
           wake_time: n ? new Date(n.end_ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
           resting_hr: round(rhr.get(day)?.value),

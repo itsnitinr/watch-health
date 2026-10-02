@@ -2,7 +2,7 @@ import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-rea
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type Domain = "activity" | "sleep" | "exercise" | "heart" | "body" | "neutral";
+export type Domain = "activity" | "sleep" | "exercise" | "heart" | "body" | "energy" | "neutral";
 
 /** Static class names per health area (Tailwind needs literal strings). */
 export const DOMAIN = {
@@ -11,6 +11,7 @@ export const DOMAIN = {
   exercise: { text: "text-exercise", chip: "bg-exercise/12 text-exercise", bar: "bg-exercise", color: "var(--exercise)" },
   heart: { text: "text-heart", chip: "bg-heart/12 text-heart", bar: "bg-heart", color: "var(--heart)" },
   body: { text: "text-body", chip: "bg-body/12 text-body", bar: "bg-body", color: "var(--body)" },
+  energy: { text: "text-energy", chip: "bg-energy/12 text-energy", bar: "bg-energy", color: "var(--energy)" },
   neutral: { text: "text-foreground", chip: "bg-muted text-foreground", bar: "bg-foreground", color: "var(--foreground)" },
 } as const;
 

@@ -1,4 +1,4 @@
-import { AlarmClock, BedDouble, CalendarRange, Gauge, Hourglass, Layers, ListOrdered, Moon, Star } from "lucide-react";
+import { AlarmClock, Award, BedDouble, CalendarRange, Gauge, Hourglass, Layers, ListOrdered, Moon, Star } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
@@ -6,6 +6,8 @@ import { BedWakeChart, SleepStages, TrendChart } from "@/components/dash/charts"
 import { STAGES } from "@/lib/palette";
 import { EmptyHint, KV, Panel, SegmentedLinks, StatTile } from "@/components/dash/primitives";
 import { StackedBar } from "@/components/dash/rings";
+import { ScoreDial, ScoreHelp, ScoreParts } from "@/components/dash/score";
+import { SCORE_HELP, type ScorePart } from "@/lib/scores";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { SLEEP_GOAL_MIN, fillDays, nights, shiftDay, sleepSummary, todayLocal, withRollingAvg } from "@/lib/analytics";
 import { fmtDay, fmtMinutes, fmtTimeOfNight } from "@/lib/format";
@@ -48,6 +50,14 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
     g.bedMin != null && g.wakeMin != null ? (g.bedMin + g.wakeMin) / 2 : null;
   const jetlag = midpoint(s.weekday) != null && midpoint(s.weekend) != null ? Math.abs(midpoint(s.weekend)! - midpoint(s.weekday)!) : null;
   const goalNights = ns.filter((n) => n.asleep >= SLEEP_GOAL_MIN).length;
+  // Average of each score part across the period, to show what drives the score
+  const avgParts: ScorePart[] = (ns.find((n) => n.scoreParts.length)?.scoreParts ?? []).map((p) => {
+    const vals = ns.map((n) => n.scoreParts.find((x) => x.key === p.key)?.score).filter((v): v is number => v != null);
+    return { ...p, score: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null,
+      detail: vals.length ? `Average over ${vals.length} nights` : "No data" };
+  });
+  // The biggest drag is the part costing the most points: its weight times its shortfall from 100
+  const weakest = [...avgParts].filter((p) => p.score != null).sort((a, b) => b.weight * (100 - b.score!) - a.weight * (100 - a.score!))[0];
   const consistency = s.bedStdev == null ? null : s.bedStdev <= 30 ? "Very consistent" : s.bedStdev <= 60 ? "Fairly consistent" : "Irregular";
 
   return (
@@ -63,6 +73,20 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
             footer={<span className="text-xs text-muted-foreground">{consistency ? `${consistency}, ±${Math.round(s.bedStdev!)} min` : ""}</span>} />
           <StatTile label="Usual wake time" icon={AlarmClock} domain="sleep" value={s.wakeMin != null ? fmtTimeOfNight(s.wakeMin) : "-"}
             footer={<span className="text-xs text-muted-foreground">{s.wakeStdev != null ? `Varies ±${Math.round(s.wakeStdev)} min` : ""}</span>} />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+          <Panel title="Sleep score" icon={Award} domain="sleep" description="This dashboard's score for each night, with the 7-day average"
+            action={<ScoreHelp title="Sleep score" text={SCORE_HELP.sleep} />}>
+            <TrendChart data={withRollingAvg(fillDays(range, ns, (n) => n.score))} label="score" color="var(--sleep)" hrefPrefix="/day/" height={390} />
+          </Panel>
+          <Panel title="What shapes your score" icon={Gauge} domain="sleep"
+            description={weakest ? `${weakest.label} is pulling your score down the most` : undefined}>
+            <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start xl:flex-col xl:items-stretch">
+              <div className="flex justify-center"><ScoreDial score={s.score != null ? Math.round(s.score) : null} color="var(--sleep)" size={104} label="average" /></div>
+              <div className="min-w-0 flex-1"><ScoreParts parts={avgParts} color="var(--sleep)" /></div>
+            </div>
+          </Panel>
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
@@ -113,7 +137,7 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
                 </div>
                 <div className="grid grid-cols-2 gap-3 border-t pt-4">
                   <KV label="Efficiency" value={s.efficiency != null ? `${Math.round(s.efficiency * 100)}%` : "-"} sub="time asleep while in bed" />
-                  <KV label="Sleep score" value={s.score != null ? Math.round(s.score) : "-"} sub="Samsung Health, average" />
+                  <KV label="Sleep score" value={s.score != null ? Math.round(s.score) : "-"} sub="average of nightly scores" />
                 </div>
                 <p className="text-xs text-muted-foreground">Stage estimates from a wrist sensor are approximate. Trends matter more than single nights.</p>
               </div>

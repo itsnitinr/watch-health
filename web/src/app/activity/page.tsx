@@ -1,11 +1,13 @@
-import { CalendarCheck, CalendarDays, Flame, Footprints, Route, Trophy } from "lucide-react";
+import { Award, CalendarCheck, CalendarDays, Flame, Footprints, Route, Trophy } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { CalendarHeatmap, DailyColumns, TrendChart } from "@/components/dash/charts";
 import { Delta, EmptyHint, Panel, SegmentedLinks, StatTile } from "@/components/dash/primitives";
 import { PageBody, PageHeader } from "@/components/page-header";
-import { GOALS, bucketAvg, dataExtent, fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { GOALS, bucketAvg, dailyScores, dataExtent, fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { ScoreHelp } from "@/components/dash/score";
+import { SCORE_HELP } from "@/lib/scores";
 import { fmtDay, fmtNum, fmtPeriod } from "@/lib/format";
 import { dailyMetric } from "@/lib/queries";
 
@@ -51,6 +53,8 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
   const prevActive = dailyMetric("active_kcal", prev).map((r) => r.value);
 
   const recorded = steps.filter((s) => s.value != null);
+  const scores = dailyScores(range);
+  const activityScores = [...scores.values()].map((x) => ({ day: x.day, value: steps.find((s) => s.day === x.day)?.value != null ? x.activity.score : null }));
   const goalDays = recorded.filter((s) => s.value! >= GOALS.steps).length;
   const best = [...recorded].sort((a, b) => b.value! - a.value!).slice(0, 5);
 
@@ -130,6 +134,11 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
                 </Panel>
               </div>
             </div>
+
+            <Panel title="Activity score" icon={Award} domain="activity" description="Steps, exercise and weekly exercise combined, for each day"
+              action={<ScoreHelp title="Activity score" text={SCORE_HELP.activity} />}>
+              <TrendChart data={withRollingAvg(activityScores)} label="score" color="var(--activity)" hrefPrefix="/day/" />
+            </Panel>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <Panel title="Distance" icon={Route} domain="activity" description="Kilometres a day">

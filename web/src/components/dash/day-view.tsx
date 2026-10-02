@@ -1,6 +1,5 @@
 import {
-  Activity, AlertTriangle, ArrowRight, BedDouble, Check, Droplets, Dumbbell, Flame, Footprints, HeartPulse,
-  Minus, Route, Scale, Sparkles, Waves,
+  Activity, ArrowRight, BedDouble, Droplets, Dumbbell, Flame, Footprints, Gauge, HeartPulse, Route, Scale, Sparkles, Target, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { PageBody, PageHeader } from "@/components/page-header";
@@ -9,20 +8,14 @@ import { STAGES } from "@/lib/palette";
 import { DateNav } from "@/components/dash/date-nav";
 import { Delta, DOMAIN, EmptyHint, IconChip, KV, Panel, PanelLink, StatTile } from "@/components/dash/primitives";
 import { ProgressRings, StackedBar } from "@/components/dash/rings";
+import { ScoreDial, ScoreHelp, ScoreParts } from "@/components/dash/score";
+import { ENERGY_ADVICE, SCORE_HELP, band } from "@/lib/scores";
 import {
-  GOALS, baselineRestingHr, baselines, dataDays, dayDetail, dayStartMs, latestDataDay, maxHeartRate, recentSeries, shiftDay,
-  trainingLoad, workoutsBetween,
+  GOALS, baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, dayStartMs, latestDataDay, maxHeartRate, recentSeries, shiftDay,
+  trainingLoad, vo2History, workoutsBetween,
 } from "@/lib/analytics";
 import { fmtClock, fmtLongDay, fmtMinutes, fmtNum, fmtPace, titleCase } from "@/lib/format";
 import { cn } from "@/lib/utils";
-
-type Signal = { name: string; value: string; detail: string; status: "good" | "ok" | "watch"; icon: typeof HeartPulse };
-
-const STATUS = {
-  good: { label: "Good", icon: Check, cls: "bg-good/12 text-good" },
-  ok: { label: "Normal", icon: Minus, cls: "bg-muted text-muted-foreground" },
-  watch: { label: "Watch", icon: AlertTriangle, cls: "bg-warn/12 text-warn" },
-} as const;
 
 function greeting(now: Date) {
   const h = now.getHours();
@@ -43,40 +36,11 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   const hasAny = d.steps != null || n != null || d.hr.length > 0 || d.workouts.length > 0;
   const latest = hasAny ? null : latestDataDay();
 
-  // Body check: three transparent signals against your own 30-day usual
-  const signals: Signal[] = [];
-  if (rhr != null && base.restingHr != null) {
-    const diff = rhr - base.restingHr;
-    signals.push({
-      name: "Resting heart rate", icon: HeartPulse,
-      value: `${Math.round(rhr)} bpm`,
-      detail: Math.abs(diff) < 1 ? "Same as usual" : `${Math.abs(Math.round(diff))} ${diff > 0 ? "above" : "below"} your usual ${Math.round(base.restingHr)}`,
-      status: diff <= -1 ? "good" : diff >= 3 ? "watch" : "ok",
-    });
-  }
-  if (d.hrv && base.hrv != null) {
-    const rel = (d.hrv.avg - base.hrv) / base.hrv;
-    signals.push({
-      name: "Heart rate variability", icon: Waves, value: `${Math.round(d.hrv.avg)} ms`,
-      detail: Math.abs(rel) < 0.03 ? "Same as usual" : `${Math.round(Math.abs(rel) * 100)}% ${rel > 0 ? "above" : "below"} your usual ${Math.round(base.hrv)} ms`,
-      status: rel >= 0.05 ? "good" : rel <= -0.1 ? "watch" : "ok",
-    });
-  }
-  if (asleep != null) {
-    const frac = asleep / GOALS.sleepMin;
-    signals.push({
-      name: "Sleep", icon: BedDouble, value: fmtMinutes(asleep),
-      detail: frac >= 1 ? "Met your sleep goal" : `${fmtMinutes(GOALS.sleepMin - asleep)} short of your ${fmtMinutes(GOALS.sleepMin)} goal`,
-      status: frac >= 0.9 ? "good" : frac < 0.75 ? "watch" : "ok",
-    });
-  }
-  const watch = signals.filter((s) => s.status === "watch").length;
-  const good = signals.filter((s) => s.status === "good").length;
-  const verdict = signals.length === 0 ? null
-    : watch >= 2 ? { title: "Take it easy", text: "Several signals are off your usual. A lighter day may help you recover." }
-    : watch === 1 ? { title: "Mostly on track", text: "One signal is off your usual. Worth keeping an eye on." }
-    : good >= 2 ? { title: "Well recovered", text: "Your body signals look better than usual." }
-    : { title: "On track", text: "Your body signals are close to your usual." };
+  const scores = dailyScores({ from: day, to: day }).get(day)!;
+  const energy = scores.energy;
+  const energyBand = energy.score != null ? band(energy.score) : null;
+  const vo2 = vo2History(day);
+  const vo2Latest = vo2.at(-1) ?? null;
 
   const rings = [
     { label: "Steps", value: d.steps ?? 0, goal: GOALS.steps, color: "var(--activity)", display: fmtNum(d.steps ?? 0), goalDisplay: fmtNum(GOALS.steps), icon: Footprints, domain: "activity" as const },
@@ -110,8 +74,21 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
         )}
 
         {/* Goals and body check */}
-        <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-          <Panel bodyClassName="flex items-center">
+        <div className="grid gap-4 xl:grid-cols-[1fr_1.15fr]">
+          <Panel title="Energy" icon={Zap} domain="energy" description="How recovered you are this morning"
+            action={<ScoreHelp title="Energy score" text={SCORE_HELP.energy} />}>
+            {energy.score != null ? (
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                <div className="flex flex-col items-center gap-2 sm:w-40">
+                  <ScoreDial score={energy.score} color="var(--energy)" size={120} />
+                  <p className="text-center text-xs text-muted-foreground">{ENERGY_ADVICE[energyBand!.label]}</p>
+                </div>
+                <div className="min-w-0 flex-1"><ScoreParts parts={energy.parts} color="var(--energy)" compact /></div>
+              </div>
+            ) : <EmptyHint icon={Zap} title="Not enough data yet">The energy score needs last night&apos;s sleep or a resting heart rate.</EmptyHint>}
+          </Panel>
+          <Panel title="Goals" icon={Target} domain="activity" description={scores.activity.score != null ? `Activity score ${scores.activity.score}, ${band(scores.activity.score).label.toLowerCase()}` : undefined}
+            action={<ScoreHelp title="Activity score" text={SCORE_HELP.activity} />} bodyClassName="flex items-center">
             <div className="flex w-full flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-10">
               <ProgressRings size={196} rings={rings.map((r) => ({ label: r.label, value: r.value, goal: r.goal, color: r.color, display: r.display, goalDisplay: r.goalDisplay }))} />
               <div className="grid w-full gap-4">
@@ -134,33 +111,6 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             </div>
           </Panel>
 
-          <Panel title="Body check" description="Today against your own 30-day usual">
-            {verdict ? (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xl font-semibold tracking-tight">{verdict.title}</p>
-                  <p className="text-sm text-muted-foreground">{verdict.text}</p>
-                </div>
-                <ul className="space-y-3">
-                  {signals.map((s) => {
-                    const st = STATUS[s.status];
-                    return (
-                      <li key={s.name} className="flex items-center gap-3">
-                        <s.icon className="size-4 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm"><span className="font-medium">{s.name}</span> <span className="tabular text-muted-foreground">{s.value}</span></div>
-                          <div className="text-xs text-muted-foreground">{s.detail}</div>
-                        </div>
-                        <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", st.cls)}>
-                          <st.icon className="size-3" />{st.label}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : <p className="text-sm text-muted-foreground">Not enough data yet to compare with your usual.</p>}
-          </Panel>
         </div>
 
         {/* Key numbers */}
@@ -187,9 +137,9 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             footer={<Delta value={rhr} reference={base.restingHr} upIsGood={false} format={(x) => `${Math.round(x)}`} threshold={0.015} />}>
             <Sparkline values={week.restingHr.map((x) => x.value)} color="var(--heart)" />
           </StatTile>
-          <StatTile label="HRV" icon={Waves} domain="heart" value={d.hrv ? Math.round(d.hrv.avg) : "-"} unit="ms" href="/heart"
-            footer={<Delta value={d.hrv?.avg} reference={base.hrv} upIsGood format={(x) => `${Math.round(x)} ms`} threshold={0.03} />}>
-            <Sparkline values={week.hrv.map((x) => x.value)} color="var(--heart)" />
+          <StatTile label="VO2 max" icon={Gauge} domain="heart" value={vo2Latest ? vo2Latest.value.toFixed(1) : "-"} unit="ml/kg/min" href="/heart"
+            footer={<span className="text-xs text-muted-foreground">{vo2Latest ? `Measured ${new Date(vo2Latest.t).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : "Measured on outdoor runs and walks"}</span>}>
+            <Sparkline values={vo2.map((x) => x.value)} color="var(--heart)" />
           </StatTile>
           <StatTile label="Blood oxygen" icon={Droplets} domain="body" value={d.spo2 ? d.spo2.avg.toFixed(1) : "-"} unit="%" href="/heart"
             footer={d.spo2 ? <span className="text-xs text-muted-foreground">usual {base.spo2 != null ? `${base.spo2.toFixed(1)}%` : "-"}</span> : <span className="text-xs text-muted-foreground">No reading</span>}>
@@ -222,7 +172,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
                 <div className="grid grid-cols-3 gap-3">
                   <KV label="Asleep" value={fmtMinutes(asleep!)} sub={base.asleep != null ? `usual ${fmtMinutes(base.asleep)}` : undefined} />
                   <KV label="Efficiency" value={`${Math.round((asleep! / n.total_min) * 100)}%`} sub={`${fmtMinutes(n.total_min)} in bed`} />
-                  <KV label="Score" value={n.score ?? "-"} />
+                  <KV label="Sleep score" value={n.score ?? "-"} sub={n.score != null ? band(n.score).label : undefined} />
                 </div>
                 {d.stages.length > 0 && (
                   <>

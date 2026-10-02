@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { dailyMetric, dailySampleStats, listDays, sleepNights, type Range, type SleepNight } from "./queries";
+import { activityScore, energyScore, sleepScore, type Score, type ScorePart } from "./scores";
 
 // node:sqlite rows have a null prototype; copy them into plain objects so they can be
 // passed to client components.
@@ -100,7 +101,7 @@ export function dayDetail(day: string) {
     floors: metric("floors"),
     restingHr: restingHeartRate(r)[0]?.value ?? null,
     hrStats: sampleAvg("heart_rate"),
-    hrv: sampleAvg("hrv_rmssd"),
+    vo2: sampleAvg("vo2_max"),
     spo2: sampleAvg("spo2"),
     weight: sampleAvg("weight"),
     night,
@@ -118,6 +119,10 @@ export function dayDetail(day: string) {
 
 export type NightStats = SleepNight & {
   uids: string[]; // the sessions merged into this night
+  score: number | null; // this dashboard's sleep score (see scores.ts)
+  scoreParts: ScorePart[];
+  deviceScore: number | null; // Samsung's own score, when the data source provides one
+  bedOffMin: number | null; // bedtime vs the median of the previous 30 nights, minutes
   asleep: number;
   efficiency: number;
   bedMin: number; // minutes after 18:00 on the evening the night started
@@ -167,7 +172,7 @@ function nightSessions(day: string, sessions: SleepNight[]): SleepNight[] {
  * (see nightSessions). This is the single definition of a night used by every page and the
  * assistant, so they all agree.
  */
-export function nights(r: Range): NightStats[] {
+function mergedNights(r: Range): Omit<NightStats, "score" | "scoreParts" | "bedOffMin">[] {
   const byDay = new Map<string, SleepNight[]>();
   for (const s of sleepNights({ from: shiftDay(r.from, -1), to: r.to })) {
     const day = nightOf(s.end_ms);
@@ -197,7 +202,7 @@ export function nights(r: Range): NightStats[] {
       rem: sum("rem"),
       light: sum("light"),
       awake: sum("awake"),
-      score: sessions.find((x) => x.score != null)?.score ?? null,
+      deviceScore: sessions.find((x) => x.score != null)?.score ?? null,
       asleep,
       efficiency: inBed > 0 ? asleep / inBed : 0,
       bedMin: minutesAfter6pm(first.start_ms),
@@ -256,6 +261,31 @@ export function restingHeartRate(r: Range): { day: string; value: number }[] {
     if (v != null) out.push({ day: n.day, value: v });
   }
   return out;
+}
+
+const median = (xs: number[]) => {
+  if (!xs.length) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  return v[Math.floor(v.length / 2)];
+};
+
+/**
+ * Nights in a range, each with its sleep score. The 30 nights before the range are loaded too,
+ * so every night's regularity is judged against the median bedtime of the 30 nights before it.
+ */
+export function nights(r: Range): NightStats[] {
+  const all = mergedNights({ from: shiftDay(r.from, -30), to: r.to });
+  return all.flatMap((n, i) => {
+    if (n.day < r.from) return [];
+    const windowStart = shiftDay(n.day, -30);
+    const prior = all.slice(0, i).filter((p) => p.day >= windowStart).map((p) => p.bedMin);
+    const usualBedMin = prior.length >= 5 ? median(prior) : null;
+    const sc = sleepScore({
+      asleep: n.asleep, inBed: n.total_min, deep: n.deep, rem: n.rem, light: n.light,
+      bedMin: n.bedMin, usualBedMin, goalMin: SLEEP_GOAL_MIN,
+    });
+    return [{ ...n, score: sc.score, scoreParts: sc.parts, bedOffMin: usualBedMin == null ? null : Math.abs(n.bedMin - usualBedMin) }];
+  });
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
@@ -479,7 +509,6 @@ export function baselines(day: string) {
     active_kcal: avgOf(dailyMetric("active_kcal", r).map((x) => x.value)),
     asleep: avgOf(nights(r).map((n) => n.asleep)),
     restingHr: avgOf(restingHeartRate(r).map((x) => x.value)),
-    hrv: avgOf(dailySampleStats("hrv_rmssd", r).map((x) => x.avg)),
     spo2: avgOf(dailySampleStats("spo2", r).map((x) => x.avg)),
     weight: lastWeight?.value ?? null,
   };
@@ -494,7 +523,6 @@ export function recentSeries(day: string, n = 7) {
     distance: fillDays(r, dailyMetric("distance_m", r), (x) => x.value),
     activeKcal: fillDays(r, dailyMetric("active_kcal", r), (x) => x.value),
     restingHr: fillDays(r, restingHeartRate(r), (x) => x.value),
-    hrv: fillDays(r, dailySampleStats("hrv_rmssd", r), (x) => x.avg),
     spo2: fillDays(r, dailySampleStats("spo2", r), (x) => x.avg),
     weight: fillDays(r, dailySampleStats("weight", r), (x) => x.avg),
     nights: nights(r),
@@ -525,4 +553,74 @@ export function latestDataDay() {
        UNION ALL SELECT date(MAX(end_ms) / 1000, 'unixepoch', 'localtime') FROM sleep_sessions
        UNION ALL SELECT date(MAX(start_ms) / 1000, 'unixepoch', 'localtime') FROM samples)`,
   )?.day ?? null;
+}
+
+/** Latest VO2 max readings (Samsung measures it during outdoor runs/walks), oldest first. */
+export function vo2History(beforeDay: string, n = 12) {
+  return all<{ t: number; value: number }>(
+    `SELECT start_ms AS t, value FROM samples WHERE type = 'vo2_max' AND start_ms < ? ORDER BY start_ms DESC LIMIT ?`,
+    dayStartMs(shiftDay(beforeDay, 1)), n,
+  ).reverse();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Daily scores
+
+export type DayScores = { day: string; sleep: Score | null; energy: Score; activity: Score };
+
+/**
+ * Sleep, Energy and Activity scores for every day in the range, computed in one pass from data
+ * loaded once (nights, resting heart rate, steps and workouts, plus the history each score
+ * needs before the range starts).
+ */
+export function dailyScores(r: Range): Map<string, DayScores> {
+  const hist = { from: shiftDay(r.from, -30), to: r.to };
+  const ns = new Map(nights({ from: shiftDay(r.from, -7), to: r.to }).map((n) => [n.day, n]));
+  const rhr = new Map(restingHeartRate(hist).map((x) => [x.day, x.value]));
+  const steps = new Map(dailyMetric("steps", r).map((x) => [x.day, x.value]));
+  const maxHr = maxHeartRate().value;
+  const restHr = baselineRestingHr();
+  const load = new Map<string, number>();
+  const exMin = new Map<string, number>();
+  for (const w of workoutsBetween(dayStartMs(shiftDay(r.from, -28)), dayStartMs(shiftDay(r.to, 1)))) {
+    const d = localDay(w.start_ms);
+    load.set(d, (load.get(d) ?? 0) + (trainingLoad(w, maxHr, restHr) ?? 0));
+    exMin.set(d, (exMin.get(d) ?? 0) + (w.end_ms - w.start_ms) / 60000);
+  }
+  const sumDays = (m: Map<string, number>, end: string, n: number) => {
+    let t = 0;
+    for (let i = 0; i < n; i++) t += m.get(shiftDay(end, -i)) ?? 0;
+    return t;
+  };
+
+  const out = new Map<string, DayScores>();
+  for (const day of listDays(r)) {
+    const night = ns.get(day) ?? null;
+    const prevRhr = Array.from({ length: 30 }, (_, i) => rhr.get(shiftDay(day, -1 - i))).filter((v): v is number => v != null);
+    const week = Array.from({ length: 7 }, (_, i) => ns.get(shiftDay(day, -i))?.asleep).filter((v): v is number => v != null);
+    const yesterday = shiftDay(day, -1);
+    out.set(day, {
+      day,
+      sleep: night ? { score: night.score, parts: night.scoreParts } : null,
+      energy: energyScore({
+        sleepScore: night?.score ?? null,
+        restingHr: rhr.get(day) ?? null,
+        restingHrUsual: prevRhr.length >= 7 ? prevRhr.reduce((a, b) => a + b, 0) / prevRhr.length : null,
+        avgAsleep7: week.length >= 3 ? week.reduce((a, b) => a + b, 0) / week.length : null,
+        goalMin: SLEEP_GOAL_MIN,
+        loadYesterday: load.get(yesterday) ?? 0,
+        loadAcute: sumDays(load, yesterday, 7) / 7,
+        loadChronic: sumDays(load, yesterday, 28) / 28,
+        bedOffMin: night?.bedOffMin ?? null,
+      }),
+      activity: activityScore({
+        steps: steps.get(day) ?? null,
+        stepGoal: GOALS.steps,
+        exerciseMin: exMin.get(day) ?? 0,
+        exerciseGoal: GOALS.exerciseMin,
+        weekExerciseMin: sumDays(exMin, day, 7),
+      }),
+    });
+  }
+  return out;
 }

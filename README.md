@@ -84,3 +84,19 @@ and SQL over a **read-only** connection to the database. Each lookup it makes is
   Ingest requires the token.
 - Some Samsung-only metrics (Energy Score, antioxidant index, vascular load, ECG) are not shared
   with Health Connect; a few may appear in the CSV export.
+
+## Scores
+
+All three are 0-100 (85+ excellent, 70-84 good, 55-69 fair, below 55 low) and are weighted
+averages of named parts, each scored 0-100, so the dashboard can always show why a score is what
+it is. Personal parts compare against your own 30-day usual. The rules live in
+`web/src/lib/scores.ts`; they are this dashboard's heuristics, not Samsung's or medical measures.
+
+| Score | Parts (weight) |
+|---|---|
+| **Sleep** (per night) | duration vs goal (35), efficiency (15), deep sleep share (15), REM share (15), bedtime regularity (20) |
+| **Energy** (each morning) | last night's sleep (30), resting HR vs usual (25), 7-night sleep balance (15), recovery from training load (20), bedtime consistency (10). A resting HR 5+ bpm above usual caps the score. |
+| **Activity** (per day) | steps vs goal (60), exercise over the last 7 days vs 150 min (30), exercise today (10) |
+
+Resting heart rate is derived from sleep: the lowest 30-minute average while asleep. Samsung
+Health doesn't share resting HR or HRV with Health Connect, so there is no HRV anywhere.

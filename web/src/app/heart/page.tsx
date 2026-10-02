@@ -1,4 +1,4 @@
-import { Activity, Droplets, HeartPulse, Percent, Scale, Thermometer, Waves, Wind } from "lucide-react";
+import { Activity, Droplets, Gauge, HeartPulse, Percent, Scale, Thermometer, Wind } from "lucide-react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { DailyLine, HeartRangeChart, TrendChart } from "@/components/dash/charts";
@@ -32,7 +32,8 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
 
   const rhr = fillDays(range, restingHeartRate(range), (r) => r.value);
   const hrDaily = dailySampleStats("heart_rate", range);
-  const hrv = fillDays(range, dailySampleStats("hrv_rmssd", range), (r) => r.avg);
+  const vo2 = fillDays(range, dailySampleStats("vo2_max", range), (r) => r.avg);
+  const vo2Recorded = vo2.filter((v) => v.value != null);
   const spo2 = fillDays(range, dailySampleStats("spo2", range), (r) => r.avg);
   const resp = fillDays(range, dailySampleStats("respiratory_rate", range), (r) => r.avg);
   const skin = fillDays(range, dailySampleStats("skin_temperature_delta", range), (r) => r.avg);
@@ -41,7 +42,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
   const has = (s: { value: number | null }[]) => s.some((p) => p.value != null);
 
   const rhrPrev = mean(restingHeartRate(prev).map((r) => r.value));
-  const hrvPrev = mean(dailySampleStats("hrv_rmssd", prev).map((r) => r.avg));
+  const vo2Prev = mean(dailySampleStats("vo2_max", prev).map((r) => r.avg));
   const spo2Prev = mean(dailySampleStats("spo2", prev).map((r) => r.avg));
   const weights = weight.filter((w) => w.value != null);
   const weightChange = weights.length >= 2 ? weights.at(-1)!.value! - weights[0].value! : null;
@@ -56,15 +57,15 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
 
   return (
     <>
-      <PageHeader title="Heart & body" subtitle="Heart rate, HRV, blood oxygen and body measurements">
+      <PageHeader title="Heart & body" subtitle="Heart rate, cardio fitness, blood oxygen and body measurements">
         <SegmentedLinks options={RANGES} current={rangeKey} href={(v) => `/heart?range=${v}`} />
       </PageHeader>
       <PageBody>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatTile label={restingLabel} icon={HeartPulse} domain="heart" value={mean(rhr.map((r) => r.value)) != null ? Math.round(mean(rhr.map((r) => r.value))!) : "-"} unit="bpm avg"
             footer={<Delta value={mean(rhr.map((r) => r.value))} reference={rhrPrev} upIsGood={false} format={(x) => `${x.toFixed(1)}`} suffix="vs previous" threshold={0.01} />} />
-          <StatTile label="HRV" icon={Waves} domain="heart" value={mean(hrv.map((r) => r.value)) != null ? Math.round(mean(hrv.map((r) => r.value))!) : "-"} unit="ms avg"
-            footer={<Delta value={mean(hrv.map((r) => r.value))} reference={hrvPrev} upIsGood format={(x) => `${Math.round(x)} ms`} suffix="vs previous" threshold={0.03} />} />
+          <StatTile label="VO2 max" icon={Gauge} domain="heart" value={vo2Recorded.length ? vo2Recorded.at(-1)!.value!.toFixed(1) : "-"} unit="latest"
+            footer={<Delta value={mean(vo2.map((r) => r.value))} reference={vo2Prev} upIsGood format={(x) => x.toFixed(1)} suffix="vs previous" threshold={0.01} />} />
           <StatTile label="Blood oxygen" icon={Droplets} domain="body" value={mean(spo2.map((r) => r.value)) != null ? mean(spo2.map((r) => r.value))!.toFixed(1) : "-"} unit="% avg"
             footer={<Delta value={mean(spo2.map((r) => r.value))} reference={spo2Prev} upIsGood format={(x) => `${x.toFixed(1)} pts`} suffix="vs previous" threshold={0.005} />} />
           <StatTile label="Weight" icon={Scale} domain="body" value={weights.length ? weights.at(-1)!.value!.toFixed(1) : "-"} unit="kg"
@@ -86,12 +87,12 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
             {has(rhr) ? <TrendChart data={withRollingAvg(rhr)} label="bpm" color="var(--heart)" hrefPrefix="/day/" />
               : <EmptyHint icon={HeartPulse} title="No data" />}
           </Panel>
-          <Panel title="Heart rate variability" icon={Waves} domain="heart"
-            description="RMSSD, measured overnight. Compare against your own trend: higher than your usual generally means well recovered.">
-            {has(hrv) ? <TrendChart data={withRollingAvg(hrv)} label="ms" color="var(--heart)" hrefPrefix="/day/" />
-              : <EmptyHint icon={Waves} title="No HRV readings">Samsung Health may not share HRV with Health Connect on every phone.</EmptyHint>}
+          <Panel title="VO2 max" icon={Gauge} domain="heart"
+            description="Cardio fitness in ml/kg/min, estimated by your watch during outdoor runs and walks. Higher is fitter; it changes slowly over weeks.">
+            {has(vo2) ? <DailyLine data={vo2} label="ml/kg/min" color="var(--heart)" digits={1} hrefPrefix="/day/" />
+              : <EmptyHint icon={Gauge} title="No VO2 max estimates in this period">Your watch estimates it during outdoor runs and brisk walks of 10+ minutes.</EmptyHint>}
           </Panel>
-          <Panel title="Blood oxygen" icon={Droplets} domain="body" description="SpO₂, usually measured during sleep. 95% and above is typical.">
+          <Panel title="Blood oxygen" icon={Droplets} domain="body" description="SpO2, usually measured during sleep. 95% and above is typical.">
             {has(spo2) ? <DailyLine data={spo2} label="%" color="var(--body)" digits={1} hrefPrefix="/day/" />
               : <EmptyHint icon={Droplets} title="No blood-oxygen readings" />}
           </Panel>
