@@ -28,7 +28,7 @@ export function AppSidebar({ lastSync }: { lastSync: string | null }) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/" onClick={() => setOpenMobile(false)}>
-                <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <Watch className="size-4" />
                 </span>
                 <span className="grid leading-tight">
