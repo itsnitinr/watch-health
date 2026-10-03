@@ -1,7 +1,8 @@
 "use client";
 
 import {
-  ArrowUp, BedDouble, Brain, ChevronDown, Database, Dumbbell, Gauge, HeartPulse, RotateCcw, Sparkles, Square, TrendingUp,
+  ArrowUp, BedDouble, Brain, Check, ChevronDown, Database, Dumbbell, Gauge, HeartPulse, LoaderCircle, RotateCcw, Sparkles,
+  Square, TrendingUp,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -18,7 +19,21 @@ import {
 import { cn } from "@/lib/utils";
 
 type Tool = { name: string; input: unknown };
-type Message = { role: "user" | "assistant"; content: string; tools?: Tool[]; error?: string; via?: string };
+type Phase = "starting" | "thinking" | "tool" | "writing";
+type Message = {
+  role: "user" | "assistant";
+  content: string;
+  tools?: Tool[];
+  error?: string;
+  via?: string;
+  /** Live progress while the answer is in flight. */
+  phase?: Phase;
+  thought?: string;
+  /** Where the text written since the last lookup starts in `content`. */
+  segStart?: number;
+  startedAt?: number;
+  ms?: number;
+};
 
 const SUGGESTIONS = [
   { icon: BedDouble, color: "text-sleep", text: "How has my sleep been this month compared to last month?" },
@@ -32,6 +47,57 @@ const TOOL_LABELS: Record<string, string> = {
   get_daily_summary: "Read the daily summary",
   query_sql: "Queried the database",
 };
+
+const TOOL_ACTIVE: Record<string, string> = {
+  get_data_coverage: "Checking what data is available",
+  get_daily_summary: "Reading the daily summary",
+  query_sql: "Querying the database",
+};
+
+/** The tail of the current thought summary, as plain text, for a two-line preview. */
+function thoughtPreview(text: string) {
+  const plain = text.replace(/[*#_`]/g, "").replace(/\s+/g, " ").trim();
+  if (plain.length <= 200) return plain;
+  const tail = plain.slice(-200);
+  return "…" + tail.slice(tail.indexOf(" ") + 1);
+}
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(since);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="tabular">{Math.max(0, Math.round((now - since) / 1000))}s</span>;
+}
+
+/** What the assistant is doing right now: finished lookups, the current step, and its latest thought. */
+function Progress({ m }: { m: Message }) {
+  const tools = m.tools ?? [];
+  const running = m.phase === "tool" ? tools.at(-1) : undefined;
+  const label = running
+    ? (TOOL_ACTIVE[running.name] ?? "Looking up data")
+    : m.phase === "thinking" ? "Thinking" : m.phase === "writing" ? "Writing" : "Getting started";
+  const thought = m.phase !== "writing" && m.thought ? thoughtPreview(m.thought) : "";
+  return (
+    <div className="mb-3 space-y-1.5 text-xs" role="status" aria-live="polite">
+      {(running ? tools.slice(0, -1) : tools).map((t, j) => (
+        <div key={j} className="flex items-center gap-2 text-muted-foreground">
+          <Check className="size-3.5 shrink-0 text-activity" />
+          {TOOL_LABELS[t.name] ?? t.name}
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />
+        <span className="shimmer-text font-medium">{label}</span>
+        {m.startedAt && <span className="text-muted-foreground">· <Elapsed since={m.startedAt} /></span>}
+      </div>
+      {thought && <p className="line-clamp-2 pl-5.5 text-muted-foreground italic">{thought}</p>}
+    </div>
+  );
+}
 
 const MODEL_KEY = "chat.model";
 const EFFORT_KEY = "chat.effort";
@@ -113,7 +179,7 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
     if (!text.trim() || busy) return;
     const history: Message[] = [...messages, { role: "user", content: text.trim() }];
     const via = hasEffort ? `${modelInfo.label} · ${effortLabel} effort` : modelInfo.label;
-    setMessages([...history, { role: "assistant", content: "", tools: [], via }]);
+    setMessages([...history, { role: "assistant", content: "", tools: [], via, phase: "starting", startedAt: Date.now() }]);
     setInput("");
     setBusy(true);
 
@@ -147,14 +213,31 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
         for (const line of lines) {
           if (!line) continue;
           const ev = JSON.parse(line);
-          if (ev.type === "text") update((m) => ({ ...m, content: m.content + ev.text }));
-          else if (ev.type === "tool") update((m) => ({ ...m, tools: [...(m.tools ?? []), { name: ev.name, input: ev.input }] }));
+          if (ev.type === "text") {
+            update((m) => ({ ...m, content: m.content + ev.text, phase: ev.text.trim() ? "writing" : m.phase }));
+          } else if (ev.type === "thinking") {
+            // A new thought replaces the previous one once another step has happened in between.
+            update((m) => ({ ...m, phase: "thinking", thought: ((m.phase === "thinking" ? m.thought ?? "" : "") + ev.text).slice(-800) }));
+          } else if (ev.type === "tool") {
+            // Text written just before a lookup is narration ("Now I'll pull…"), not the answer:
+            // move it out of the answer and show it as the current step's note.
+            update((m) => {
+              const start = m.segStart ?? 0;
+              const content = m.content.slice(0, start);
+              return {
+                ...m, content, segStart: content.length, phase: "tool",
+                thought: m.content.slice(start).trim(),
+                tools: [...(m.tools ?? []), { name: ev.name, input: ev.input }],
+              };
+            });
+          }
           else if (ev.type === "error") update((m) => ({ ...m, error: ev.message }));
         }
       }
     } catch (e) {
       if (!abort.signal.aborted) update((m) => ({ ...m, error: e instanceof Error ? e.message : String(e) }));
     } finally {
+      update((m) => ({ ...m, phase: undefined, thought: undefined, ms: m.startedAt && Date.now() - m.startedAt }));
       setBusy(false);
       abortRef.current = null;
     }
@@ -214,7 +297,9 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
                     <Sparkles className="size-3.5" />
                   </span>
                   <div className="min-w-0 flex-1 text-sm">
-                    {!!m.tools?.length && (
+                    {busy && i === messages.length - 1 && m.phase !== "writing" ? (
+                      <Progress m={m} />
+                    ) : !!m.tools?.length && (
                       <details className="group mb-2 text-xs text-muted-foreground">
                         <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 hover:text-foreground">
                           <Database className="size-3" />
@@ -237,19 +322,11 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
                     <div className="prose-chat">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                     </div>
-                    {busy && i === messages.length - 1 && !m.content && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <span className="flex gap-1">
-                          {[0, 1, 2].map((d) => (
-                            <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground motion-reduce:animate-none" style={{ animationDelay: `${d * 120}ms` }} />
-                          ))}
-                        </span>
-                        Looking at your data
-                      </div>
-                    )}
                     {m.error && <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-destructive">{m.error}</p>}
                     {m.via && !(busy && i === messages.length - 1) && (
-                      <p className="mt-2 text-xs text-muted-foreground">{m.via}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {m.via}{m.ms ? ` · ${Math.round(m.ms / 1000)}s` : ""}
+                      </p>
                     )}
                   </div>
                 </div>

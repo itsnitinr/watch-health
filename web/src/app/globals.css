@@ -218,3 +218,19 @@
 .prose-chat table { border-collapse: collapse; font-variant-numeric: tabular-nums; display: block; overflow-x: auto; font-size: 0.9em; }
 .prose-chat th, .prose-chat td { border-bottom: 1px solid var(--border); padding: 0.4em 1em 0.4em 0; text-align: left; }
 .prose-chat th { color: var(--muted-foreground); font-weight: 500; }
+
+/* "Working" label in the chat progress panel: a soft highlight sweeping across the text */
+.shimmer-text {
+  background: linear-gradient(90deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-text 2.2s linear infinite;
+}
+@keyframes shimmer-text {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text { animation: none; color: var(--muted-foreground); background: none; }
+}

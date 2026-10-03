@@ -188,6 +188,8 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 export type AgentEvent =
   | { type: "text"; text: string }
+  /** Summarized reasoning, shown as live progress while the answer is being worked out. */
+  | { type: "thinking"; text: string }
   | { type: "tool"; name: string; input: unknown }
   | { type: "error"; message: string };
 
@@ -226,6 +228,7 @@ async function* runApiAgent(history: ChatTurn[], model: ModelId, effort?: Effort
     max_tokens: 64000,
     ...(effort && {
       output_config: { effort },
+      thinking: { type: "adaptive" as const, display: "summarized" as const },
       // On a safety-classifier decline, the API re-runs the request on an appropriate fallback model.
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default" as const,
@@ -246,6 +249,8 @@ async function* runApiAgent(history: ChatTurn[], model: ModelId, effort?: Effort
         for await (const event of messageStream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             yield { type: "text", text: event.delta.text };
+          } else if (event.type === "content_block_delta" && event.delta.type === "thinking_delta") {
+            yield { type: "thinking", text: event.delta.thinking };
           }
         }
         const message = await messageStream.finalMessage();
@@ -260,8 +265,6 @@ async function* runApiAgent(history: ChatTurn[], model: ModelId, effort?: Effort
           return;
         }
         for (const t of toolUses) yield { type: "tool", name: t.name, input: t.input };
-        // Separate the text of consecutive turns (before/after tool calls).
-        if (toolUses.length) yield { type: "text", text: "\n\n" };
       }
       return;
     } catch (err) {
@@ -311,6 +314,8 @@ async function* runClaudeCodeAgent(history: ChatTurn[], model: ModelId, effort?:
     options: {
       model,
       effort,
+      // Haiku (no effort) has no adaptive thinking; the rest summarize theirs for the progress display.
+      ...(effort && { thinking: { type: "adaptive" as const, display: "summarized" as const } }),
       systemPrompt: [SYSTEM, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, todayLine()],
       tools: [],
       mcpServers: { [MCP_SERVER]: healthServer },
@@ -332,11 +337,12 @@ async function* runClaudeCodeAgent(history: ChatTurn[], model: ModelId, effort?:
         const ev = msg.event;
         if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
           yield { type: "text", text: ev.delta.text };
+        } else if (ev.type === "content_block_delta" && ev.delta.type === "thinking_delta") {
+          yield { type: "thinking", text: ev.delta.thinking };
         }
       } else if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
         const toolUses = msg.message.content.filter((b) => b.type === "tool_use");
         for (const t of toolUses) yield { type: "tool", name: t.name.replace(MCP_PREFIX, ""), input: t.input };
-        if (toolUses.length) yield { type: "text", text: "\n\n" };
       } else if (msg.type === "auth_status" && msg.error) {
         yield { type: "error", message: `Claude Code is not logged in (${msg.error}). Run \`claude\` and /login, then retry.` };
         return;
