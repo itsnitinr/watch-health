@@ -121,6 +121,9 @@ export function dayDetail(day: string) {
     distance_m: dailyDistance(r)[0]?.value ?? null,
     distanceEstimated: dailyDistance(r)[0]?.estimated ?? false,
     active_kcal: metric("active_kcal"),
+    activeKcalEstimated: one<{ source: string | null }>(
+      `SELECT source FROM daily_metrics WHERE day = ? AND metric = 'active_kcal'`, day,
+    )?.source === "estimated",
     total_kcal: metric("total_kcal"),
     floors: metric("floors"),
     restingHr: restingHeartRate(r)[0]?.value ?? null,

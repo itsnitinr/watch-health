@@ -5,6 +5,7 @@ import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.aggregate.AggregateMetric
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.BasalMetabolicRateRecord
 import androidx.health.connect.client.records.BloodPressureRecord
 import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.DistanceRecord
@@ -43,7 +44,7 @@ class HealthReader(private val client: HealthConnectClient) {
     companion object {
         val RECORD_TYPES: List<KClass<out Record>> = listOf(
             StepsRecord::class, DistanceRecord::class, FloorsClimbedRecord::class,
-            ActiveCaloriesBurnedRecord::class, TotalCaloriesBurnedRecord::class,
+            ActiveCaloriesBurnedRecord::class, TotalCaloriesBurnedRecord::class, BasalMetabolicRateRecord::class,
             HeartRateRecord::class, RestingHeartRateRecord::class, HeartRateVariabilityRmssdRecord::class,
             OxygenSaturationRecord::class, RespiratoryRateRecord::class, SkinTemperatureRecord::class,
             BloodPressureRecord::class, WeightRecord::class, BodyFatRecord::class, Vo2MaxRecord::class,
@@ -202,6 +203,7 @@ class HealthReader(private val client: HealthConnectClient) {
             if (can(DistanceRecord::class)) put("distance_m", DistanceRecord.DISTANCE_TOTAL)
             if (can(ActiveCaloriesBurnedRecord::class)) put("active_kcal", ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
             if (can(TotalCaloriesBurnedRecord::class)) put("total_kcal", TotalCaloriesBurnedRecord.ENERGY_TOTAL)
+            if (can(BasalMetabolicRateRecord::class)) put("basal_kcal", BasalMetabolicRateRecord.BASAL_CALORIES_TOTAL)
             if (can(FloorsClimbedRecord::class)) put("floors", FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL)
         }
         val out = JSONArray()
@@ -219,15 +221,25 @@ class HealthReader(private val client: HealthConnectClient) {
         )
         for (b in buckets) {
             val day = b.startTime.toLocalDate().toString()
-            for ((name, metric) in metrics) {
+            val values = metrics.mapNotNull { (name, metric) ->
                 val value = when (val v = b.result[metric]) {
                     is Long -> v.toDouble()
                     is Double -> v
                     is androidx.health.connect.client.units.Length -> v.inMeters
                     is androidx.health.connect.client.units.Energy -> v.inKilocalories
                     else -> null
-                } ?: continue
+                }
+                value?.let { name to it }
+            }.toMap()
+            for ((name, value) in values) {
                 out.put(JSONObject().put("day", day).put("metric", name).put("value", value).put("source", "health_connect"))
+            }
+            // Samsung Health writes total calories but rarely active ones. Health Connect's total is
+            // basal + active, so when active is missing it is the difference, marked as estimated.
+            val total = values["total_kcal"]
+            val basal = values["basal_kcal"]
+            if ("active_kcal" !in values && total != null && basal != null) {
+                out.put(JSONObject().put("day", day).put("metric", "active_kcal").put("value", maxOf(0.0, total - basal)).put("source", "estimated"))
             }
         }
         return out

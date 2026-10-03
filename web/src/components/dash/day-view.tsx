@@ -125,7 +125,8 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             <Sparkline values={week.distance.map((x) => x.value)} color="var(--activity)" />
           </StatTile>
           <StatTile label="Active calories" icon={Flame} domain="activity" value={d.active_kcal != null ? fmtNum(d.active_kcal) : "-"} unit="kcal" href="/activity"
-            footer={d.active_kcal != null ? <Delta value={d.active_kcal} reference={base.active_kcal} upIsGood format={(x) => fmtNum(x)} />
+            footer={d.active_kcal != null ? <Delta value={d.active_kcal} reference={base.active_kcal} upIsGood format={(x) => fmtNum(x)}
+              suffix={d.activeKcalEstimated ? "vs usual · estimated" : "vs usual"} />
               : d.total_kcal != null ? <span className="text-xs text-muted-foreground">{fmtNum(d.total_kcal)} kcal total</span> : null}>
             <Sparkline values={week.activeKcal.map((x) => x.value)} color="var(--activity)" />
           </StatTile>

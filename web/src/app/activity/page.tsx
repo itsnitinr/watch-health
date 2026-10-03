@@ -146,7 +146,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
                 <TrendChart data={withRollingAvg(distance.map((d) => ({ day: d.day, value: d.value != null ? d.value / 1000 : null })))}
                   label="km" color="var(--activity)" digits={1} hrefPrefix="/day/" />
               </Panel>
-              <Panel title="Active calories" icon={Flame} domain="activity" description="Calories burned through movement">
+              <Panel title="Active calories" icon={Flame} domain="activity" description="Calories burned through movement. Where Samsung doesn't share them, estimated as total minus resting (basal) calories.">
                 {active.some((a) => a.value != null)
                   ? <TrendChart data={withRollingAvg(active)} label="kcal" color="var(--activity)" hrefPrefix="/day/" />
                   : <EmptyHint icon={Flame} title="No active-calorie data in this period" />}

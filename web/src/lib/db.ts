@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS samples_type_time ON samples (type, start_ms);
 -- from multiple devices would double count.
 CREATE TABLE IF NOT EXISTS daily_metrics (
   day     TEXT NOT NULL,           -- local date, YYYY-MM-DD
-  metric  TEXT NOT NULL,           -- steps, distance_m, active_kcal, total_kcal, floors, active_min
+  metric  TEXT NOT NULL,           -- steps, distance_m, active_kcal, total_kcal, basal_kcal, floors, active_min
   value   REAL NOT NULL,
   source  TEXT,
   PRIMARY KEY (day, metric)

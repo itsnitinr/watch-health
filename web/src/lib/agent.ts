@@ -20,7 +20,8 @@ samples(uid, type, start_ms, end_ms, value, unit, source, meta JSON)
   consistent value), hrv_rmssd (ms, not shared by Samsung Health, so normally absent), spo2 (%), weight (kg), body_fat (%), skeletal_muscle_mass (kg), respiratory_rate,
   skin_temperature, stress, blood_pressure_systolic, blood_pressure_diastolic, vo2_max.
 daily_metrics(day 'YYYY-MM-DD' local, metric, value, source)
-  Per-day totals, already de-duplicated across phone + watch: steps, distance_m, active_kcal, total_kcal, floors, active_min.
+  Per-day totals, already de-duplicated across phone + watch: steps, distance_m, active_kcal, total_kcal, basal_kcal, floors, active_min.
+  active_kcal rows with source 'estimated' are total_kcal minus basal_kcal (Samsung rarely shares active calories).
 sleep_sessions(uid, start_ms, end_ms, score, source, meta JSON)
   One night is often SEVERAL sessions (the watch splits the night when you wake briefly). For per-night
   sleep figures use get_daily_summary, which merges them; if you write SQL, group sessions by
