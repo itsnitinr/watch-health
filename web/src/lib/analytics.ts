@@ -101,6 +101,14 @@ export function intradayHeartRate(fromMs: number, toMs: number) {
   );
 }
 
+/** Raw readings of one sample type in a time window, oldest first. */
+export function samplesBetween(type: string, fromMs: number, toMs: number) {
+  return all<{ t: number; value: number }>(
+    `SELECT start_ms AS t, value FROM samples WHERE type = ? AND start_ms >= ? AND start_ms < ? ORDER BY start_ms`,
+    type, fromMs, toMs,
+  );
+}
+
 export function sleepStages(sessionUid: string) {
   return all<{ stage: string; start_ms: number; end_ms: number }>(
     `SELECT stage, start_ms, end_ms FROM sleep_stages WHERE session_uid = ? ORDER BY start_ms`,
@@ -444,7 +452,7 @@ export function timeInZones(hr: { t: number; bpm: number }[], endMs: number, max
 }
 
 /** Banister TRIMP for `minutes` at heart rate `bpm`, weighted exponentially so hard efforts count more. */
-const trimp = (minutes: number, bpm: number, maxHr: number, restHr: number) => {
+export const trimp = (minutes: number, bpm: number, maxHr: number, restHr: number) => {
   const hrr = Math.min(1, Math.max(0, (bpm - restHr) / (maxHr - restHr)));
   return minutes * hrr * 0.64 * Math.exp(1.92 * hrr);
 };
@@ -455,7 +463,7 @@ export function trainingLoad(w: Workout, maxHr: number, restHr: number) {
 }
 
 /** Heart rate at or above this share of heart-rate reserve counts towards the day's strain. */
-const RAISED_HRR = 0.3;
+export const RAISED_HRR = 0.3;
 
 /**
  * Per day, the training load from every heart-rate reading at or above RAISED_HRR, and the

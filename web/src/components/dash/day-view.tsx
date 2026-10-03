@@ -8,11 +8,12 @@ import { STAGES } from "@/lib/palette";
 import { DateNav } from "@/components/dash/date-nav";
 import { Delta, DOMAIN, EmptyHint, IconChip, KV, Panel, PanelLink, StatTile } from "@/components/dash/primitives";
 import { ProgressRings, StackedBar } from "@/components/dash/rings";
+import { DayDetail } from "@/components/dash/day-detail";
 import { ScoreHelp, ScoreSummaries, type ScoreSummary } from "@/components/dash/score";
 import { ENERGY_ADVICE, SCORE_HELP, SLEEP_ADVICE, band, strainBand, strainTarget } from "@/lib/scores";
 import {
-  GOALS, baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, dayStartMs, latestDataDay, maxHeartRate, recentSeries, shiftDay,
-  trainingLoad, vo2History, workoutsBetween,
+  GOALS, baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, latestDataDay, maxHeartRate, recentSeries, shiftDay,
+  trainingLoad, vo2History,
 } from "@/lib/analytics";
 import { fmtClock, fmtLongDay, fmtMinutes, fmtNum, fmtPace, titleCase } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -218,12 +219,12 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             <DailyColumns data={week.steps} label="steps" color="var(--activity)" goal={GOALS.steps} hrefPrefix="/day/" height={170} highlight={day} />
           </Panel>
 
-          <Panel title={d.workouts.some((w) => !w.auto) ? "Workouts" : "Recent workouts"} icon={Dumbbell} domain="exercise"
+          <Panel title="Workouts" icon={Dumbbell} domain="exercise"
             action={<PanelLink href="/workouts">All</PanelLink>}>
             {(() => {
-              const own = d.workouts.filter((w) => !w.auto);
-              const list = own.length ? own : recentWorkouts(week.days);
-              if (!list.length) return <EmptyHint icon={Dumbbell} title="No workouts this week" />;
+              // Walks the watch detected on its own are left out; they show under Day in detail
+              const list = d.workouts.filter((w) => !w.auto);
+              if (!list.length) return <EmptyHint icon={Dumbbell} title="No workouts" />;
               return (
                 <ul className="-mx-2 space-y-1">
                   {list.slice(0, 4).map((w) => {
@@ -266,11 +267,9 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             </div>
           </Panel>
         </div>
+
+        {hasAny && <DayDetail day={day} d={d} now={now} strainTarget={target} />}
       </PageBody>
     </>
   );
-}
-
-function recentWorkouts(days: string[]) {
-  return workoutsBetween(dayStartMs(days[0]), dayStartMs(shiftDay(days.at(-1)!, 1)), { includeAuto: false });
 }

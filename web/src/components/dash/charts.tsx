@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, type TooltipContentProps,
 } from "recharts";
 import { STAGES, ZONE_COLORS } from "@/lib/palette";
-import { fmtClock, fmtDay, fmtMinutes, fmtNum, fmtPeriod, fmtTimeOfNight, type Period } from "@/lib/format";
+import { fmtClock, fmtDay, fmtMinutes, fmtNum, fmtPeriod, fmtTimeOfNight, titleCase, type Period } from "@/lib/format";
 
 type Point = { day: string; value: number | null };
 type ValueFormat = "number" | "minutes";
@@ -491,7 +491,7 @@ export function ZoneBars({ seconds, zones }: {
   return (
     <div className="space-y-3 text-xs">
       {zones.map((z, i) => (
-        <div key={z.label} className="grid grid-cols-[8.75rem_1fr_4.75rem] items-center gap-3">
+        <div key={z.label} className="grid grid-cols-[8.75rem_1fr_auto] items-center gap-3">
           <div className="leading-tight">
             <div className="font-medium">{z.name}</div>
             <div className="text-muted-foreground">{z.label} · {z.range}</div>
@@ -499,7 +499,7 @@ export function ZoneBars({ seconds, zones }: {
           <div className="h-2.5">
             <div className="h-2.5 rounded-full" style={{ width: `${Math.max(1.5, (seconds[i] / max) * 100)}%`, background: ZONE_COLORS[i] }} />
           </div>
-          <div className="tabular text-right">
+          <div className="tabular min-w-[4.75rem] whitespace-nowrap text-right">
             <span className="font-semibold">{fmtMinutes(seconds[i] / 60)}</span>
             <span className="ml-1 text-muted-foreground">{total ? Math.round((seconds[i] / total) * 100) : 0}%</span>
           </div>
@@ -531,6 +531,58 @@ export function DailyLine({ data, label, color, digits = 0, hrefPrefix, height =
         <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} connectNulls
           dot={{ r: 2.5, fill: color, strokeWidth: 0 }} activeDot={{ r: 4, fill: color, stroke: "var(--card)", strokeWidth: 2 }} />
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Strain accumulating through the day, with workouts shaded, against the strain bands. */
+export function StrainBuild({ points, from, to, bands = [], target, height = 220 }: {
+  points: { t: number; strain: number }[];
+  from: number;
+  to: number;
+  bands?: { from: number; to: number; label: string }[];
+  target?: [number, number] | null;
+  height?: number;
+}) {
+  const gid = useId().replace(/:/g, "");
+  const color = "var(--strain)";
+  const ticks: number[] = [];
+  const first = new Date(from);
+  first.setMinutes(0, 0, 0);
+  for (let t = first.getTime(); t <= to; t += 3 * 3600000) if (t >= from) ticks.push(t);
+  const top = Math.max(60, Math.ceil(Math.max(...points.map((p) => p.strain), target?.[1] ?? 0) / 20) * 20);
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={points} margin={MARGIN}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.25} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        {GRID}
+        {target && (
+          <ReferenceArea y1={target[0]} y2={target[1]} fill={color} fillOpacity={0.08} stroke="none" ifOverflow="hidden"
+            label={{ value: "Target", position: "insideTopLeft", fill: "var(--chart-ink)", fontSize: 11 }} />
+        )}
+        {bands.map((b) => (
+          <ReferenceArea key={b.from} x1={b.from} x2={b.to} fill="var(--exercise)" fillOpacity={0.12} stroke="none" />
+        ))}
+        <XAxis dataKey="t" type="number" domain={[from, to]} scale="time" {...AXIS} ticks={ticks} tickFormatter={fmtClock} />
+        <YAxis {...AXIS} axisLine={false} width={36} domain={[0, top]} ticks={[0, 30, 55, 80].filter((v) => v <= top)} />
+        <Tooltip
+          cursor={{ stroke: "var(--chart-axis)", strokeWidth: 1 }}
+          content={({ active, payload }: TooltipContentProps) => {
+            if (!active || !payload?.length) return null;
+            const p = payload[0].payload as { t: number; strain: number };
+            const inWorkout = bands.find((b) => p.t >= b.from && p.t <= b.to);
+            return <TooltipBox title={fmtClock(p.t)} hint={inWorkout ? titleCase(inWorkout.label) : undefined}
+              rows={[{ label: "strain so far", value: String(Math.round(p.strain)), color }]} />;
+          }}
+        />
+        <Area type="stepAfter" dataKey="strain" stroke={color} strokeWidth={2} fill={`url(#${gid})`}
+          isAnimationActive={false} activeDot={{ r: 4, fill: color, stroke: "var(--card)", strokeWidth: 2 }} />
+      </AreaChart>
     </ResponsiveContainer>
   );
 }

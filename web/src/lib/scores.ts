@@ -208,6 +208,8 @@ export type StrainInput = {
  */
 const STRAIN_CURVE: [number, number][] = [[0, 0], [10, 10], [30, 25], [60, 40], [100, 55], [150, 67], [220, 80], [320, 90], [500, 98]];
 
+export const strainFromLoad = (load: number) => interp(load, STRAIN_CURVE);
+
 export const STRAIN_BANDS = [
   { min: 80, label: "All out", tone: "neutral" },
   { min: 55, label: "High", tone: "neutral" },
@@ -222,16 +224,16 @@ export function strainScore(s: StrainInput): Score {
   const total = Math.max(s.hrLoad, s.workoutLoad);
   const other = Math.max(0, total - s.workoutLoad);
   return {
-    score: Math.round(interp(total, STRAIN_CURVE)),
+    score: Math.round(strainFromLoad(total)),
     parts: [
       {
         key: "workouts", label: "Workouts", weight: total ? Math.round((s.workoutLoad / total) * 100) : 0,
-        score: Math.round(interp(Math.min(s.workoutLoad, total), STRAIN_CURVE)),
+        score: Math.round(strainFromLoad(Math.min(s.workoutLoad, total))),
         detail: s.workoutCount ? `${s.workoutCount} workout${s.workoutCount > 1 ? "s" : ""}, ${hm(s.workoutMin)}` : "No workouts",
       },
       {
         key: "everyday", label: "Rest of the day", weight: total ? Math.round((other / total) * 100) : 0,
-        score: Math.round(interp(other, STRAIN_CURVE)),
+        score: Math.round(strainFromLoad(other)),
         detail: "Walking, stairs and other raised heart rate",
       },
       {
