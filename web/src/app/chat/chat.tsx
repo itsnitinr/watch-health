@@ -1,21 +1,25 @@
 "use client";
 
 import {
-  ArrowUp, BedDouble, Brain, Check, ChevronDown, Database, Dumbbell, Gauge, HeartPulse, LoaderCircle, RotateCcw, Sparkles,
-  Square, TrendingUp,
+  ArrowUp, BedDouble, Brain, Check, ChevronDown, Database, Dumbbell, Gauge, HeartPulse, History, LoaderCircle, RotateCcw,
+  Sparkles, Square, Trash2, TrendingUp,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { formatDistanceToNowStrict } from "date-fns";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import {
   DEFAULT_EFFORT, DEFAULT_MODEL, EFFORTS, MODELS, isEffort, isModelId, supportsEffort, type Effort, type ModelId,
 } from "@/lib/models";
+import type { Thread, ThreadSummary } from "@/lib/chats";
 import { cn } from "@/lib/utils";
 
 type Tool = { name: string; input: unknown };
@@ -99,6 +103,20 @@ function Progress({ m }: { m: Message }) {
   );
 }
 
+/** A random thread id. crypto.randomUUID needs a secure context, which a phone on the LAN over http is not. */
+function newThreadId() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Keeps only what is worth reopening later; live progress fields are dropped. */
+function toSaved({ role, content, tools, error, via, ms }: Message) {
+  return { role, content, tools, error, via, ms };
+}
+
+function ago(ms: number) {
+  return formatDistanceToNowStrict(ms, { addSuffix: true });
+}
+
 const MODEL_KEY = "chat.model";
 const EFFORT_KEY = "chat.effort";
 
@@ -160,6 +178,70 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
+  // The thread in the URL (?t=) is the source of truth; threadRef is the thread the messages on screen belong to.
+  const urlThread = useSearchParams().get("t");
+  const threadRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(!!urlThread);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+
+  const refreshThreads = useCallback(async () => {
+    try {
+      const res = await fetch("/api/threads");
+      if (res.ok) setThreads((await res.json()).threads);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    void refreshThreads();
+  }, [refreshThreads]);
+
+  // Opening a thread, starting a new chat, or going back/forward changes ?t=; load whatever it now points at.
+  useEffect(() => {
+    if (urlThread === threadRef.current) return;
+    abortRef.current?.abort();
+    threadRef.current = urlThread;
+    setMessages([]);
+    if (!urlThread) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/threads/${encodeURIComponent(urlThread)}`)
+      .then((res) => (res.ok ? (res.json() as Promise<Thread>) : null))
+      .then((thread) => {
+        if (cancelled) return;
+        if (thread) setMessages(thread.messages);
+        else {
+          threadRef.current = null;
+          window.history.replaceState(null, "", "/chat");
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [urlThread]);
+
+  async function saveThread(id: string, ms: Message[]) {
+    try {
+      await fetch(`/api/threads/${id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: ms.map(toSaved) }),
+      });
+    } catch {}
+    void refreshThreads();
+  }
+
+  async function removeThread(id: string) {
+    setThreads((ts) => ts.filter((t) => t.id !== id));
+    try {
+      await fetch(`/api/threads/${id}`, { method: "DELETE" });
+    } catch {}
+    void refreshThreads();
+  }
+
+  const openThread = (id: string | null) => window.history.pushState(null, "", id ? `/chat?t=${id}` : "/chat");
 
   // Restore the last-used picks after hydration, so server and client render the same markup first.
   useEffect(() => {
@@ -176,15 +258,26 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   }, [messages]);
 
   async function send(text: string) {
-    if (!text.trim() || busy) return;
+    if (!text.trim() || busy || loading) return;
+    // The first question starts a thread; replacing the URL also drops a ?q= so a reload doesn't ask it again.
+    let id = threadRef.current;
+    if (!id) {
+      id = newThreadId();
+      threadRef.current = id;
+      window.history.replaceState(null, "", `/chat?t=${id}`);
+    }
     const history: Message[] = [...messages, { role: "user", content: text.trim() }];
     const via = hasEffort ? `${modelInfo.label} · ${effortLabel} effort` : modelInfo.label;
-    setMessages([...history, { role: "assistant", content: "", tools: [], via, phase: "starting", startedAt: Date.now() }]);
+    let reply: Message = { role: "assistant", content: "", tools: [], via, phase: "starting", startedAt: Date.now() };
+    setMessages([...history, reply]);
     setInput("");
     setBusy(true);
 
-    const update = (fn: (m: Message) => Message) =>
-      setMessages((ms) => [...ms.slice(0, -1), fn(ms[ms.length - 1])]);
+    // The reply is tracked here too, so it can be saved even if another thread was opened meanwhile.
+    const update = (fn: (m: Message) => Message) => {
+      reply = fn(reply);
+      if (threadRef.current === id) setMessages([...history, reply]);
+    };
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -240,6 +333,7 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
       update((m) => ({ ...m, phase: undefined, thought: undefined, ms: m.startedAt && Date.now() - m.startedAt }));
       setBusy(false);
       abortRef.current = null;
+      void saveThread(id, [...history, reply]);
     }
   }
 
@@ -255,8 +349,25 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   return (
     <div className="flex h-[100dvh] flex-col md:h-full">
       <PageHeader title="Ask" subtitle="Questions answered from your own watch data">
-        {messages.length > 0 && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => setMessages([])}>
+        {threads.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={busy}>
+              <Button variant="outline" size="sm"><History />History</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-96 w-80 overflow-y-auto">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Recent chats</DropdownMenuLabel>
+              {threads.map((t) => (
+                <DropdownMenuItem key={t.id} onSelect={() => openThread(t.id)}
+                  className={cn("flex-col items-start gap-0 py-1.5", t.id === urlThread && "bg-muted")}>
+                  <span className="w-full truncate">{t.title}</span>
+                  <span className="text-xs text-muted-foreground">{ago(t.updated_ms)}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {(messages.length > 0 || urlThread) && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => openThread(null)}>
             <RotateCcw />New chat
           </Button>
         )}
@@ -264,7 +375,13 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          {messages.length === 0 && (
+          {loading && (
+            <div className="flex items-center gap-2 pt-6 text-sm text-muted-foreground" role="status">
+              <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />Loading chat
+            </div>
+          )}
+
+          {messages.length === 0 && !loading && (
             <div className="pt-6 md:pt-14">
               <span className="mb-4 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                 <Sparkles className="size-5" />
@@ -282,6 +399,26 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
                   </button>
                 ))}
               </div>
+              {threads.length > 0 && (
+                <section className="mt-10">
+                  <h3 className="mb-2 text-xs font-medium text-muted-foreground">Recent chats</h3>
+                  <ul className="divide-y rounded-xl border bg-card">
+                    {threads.slice(0, 8).map((t) => (
+                      <li key={t.id} className="group flex items-center">
+                        <button onClick={() => openThread(t.id)}
+                          className="min-w-0 flex-1 px-4 py-3 text-left text-sm transition-colors hover:bg-muted/40">
+                          <span className="block truncate">{t.title}</span>
+                          <span className="text-xs text-muted-foreground">{ago(t.updated_ms)}</span>
+                        </button>
+                        <Button variant="ghost" size="icon-sm" aria-label={`Delete "${t.title}"`} onClick={() => removeThread(t.id)}
+                          className="mr-2 text-muted-foreground opacity-100 hover:text-destructive md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+                          <Trash2 />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
           )}
 

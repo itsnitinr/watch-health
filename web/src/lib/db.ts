@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
-const DB_PATH =
+export const DB_PATH =
   process.env.HEALTH_DB_PATH ?? path.join(process.cwd(), "..", "data", "health.db");
 
 const SCHEMA = `
