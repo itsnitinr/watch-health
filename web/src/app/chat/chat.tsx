@@ -1,16 +1,24 @@
 "use client";
 
-import { ArrowUp, BedDouble, Database, Dumbbell, HeartPulse, RotateCcw, Sparkles, Square, TrendingUp } from "lucide-react";
+import {
+  ArrowUp, BedDouble, Brain, ChevronDown, Database, Dumbbell, Gauge, HeartPulse, RotateCcw, Sparkles, Square, TrendingUp,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DEFAULT_EFFORT, DEFAULT_MODEL, EFFORTS, MODELS, isEffort, isModelId, supportsEffort, type Effort, type ModelId,
+} from "@/lib/models";
 import { cn } from "@/lib/utils";
 
 type Tool = { name: string; input: unknown };
-type Message = { role: "user" | "assistant"; content: string; tools?: Tool[]; error?: string };
+type Message = { role: "user" | "assistant"; content: string; tools?: Tool[]; error?: string; via?: string };
 
 const SUGGESTIONS = [
   { icon: BedDouble, color: "text-sleep", text: "How has my sleep been this month compared to last month?" },
@@ -25,13 +33,77 @@ const TOOL_LABELS: Record<string, string> = {
   query_sql: "Queried the database",
 };
 
+const MODEL_KEY = "chat.model";
+const EFFORT_KEY = "chat.effort";
+
+function stored<T>(key: string, valid: (v: unknown) => v is T): T | undefined {
+  try {
+    const v = localStorage.getItem(key);
+    return valid(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function Picker<T extends string>({ icon: Icon, label, title, value, options, onChange, disabled }: {
+  icon: typeof Brain;
+  label: string;
+  title: string;
+  value: T;
+  options: readonly { id: T; label: string; hint: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        <Button type="button" variant="ghost" size="sm" aria-label={`${title}: ${label}`}
+          className="h-7 gap-1 rounded-full px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground">
+          <Icon className="size-3.5" />
+          {label}
+          <ChevronDown className="size-3 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" className="w-60">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{title}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={value} onValueChange={(v) => onChange(v as T)}>
+          {options.map((o) => (
+            <DropdownMenuRadioItem key={o.id} value={o.id} className="flex-col items-start gap-0 py-1.5">
+              <span>{o.label}</span>
+              <span className="text-xs text-muted-foreground">{o.hint}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
+  const [effort, setEffort] = useState<Effort>(DEFAULT_EFFORT);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
+
+  // Restore the last-used picks after hydration, so server and client render the same markup first.
+  useEffect(() => {
+    setModel((m) => stored(MODEL_KEY, isModelId) ?? m);
+    setEffort((e) => stored(EFFORT_KEY, isEffort) ?? e);
+  }, []);
+
+  const modelInfo = MODELS.find((m) => m.id === model)!;
+  const effortLabel = EFFORTS.find((e) => e.id === effort)!.label;
+  const hasEffort = supportsEffort(model);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -40,7 +112,8 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   async function send(text: string) {
     if (!text.trim() || busy) return;
     const history: Message[] = [...messages, { role: "user", content: text.trim() }];
-    setMessages([...history, { role: "assistant", content: "", tools: [] }]);
+    const via = hasEffort ? `${modelInfo.label} · ${effortLabel} effort` : modelInfo.label;
+    setMessages([...history, { role: "assistant", content: "", tools: [], via }]);
     setInput("");
     setBusy(true);
 
@@ -56,6 +129,8 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
         // Only completed text turns are sent; failed turns are dropped from the history.
         body: JSON.stringify({
           messages: history.filter((m) => !m.error && m.content).map(({ role, content }) => ({ role, content })),
+          model,
+          effort,
         }),
         signal: abort.signal,
       });
@@ -173,6 +248,9 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
                       </div>
                     )}
                     {m.error && <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-destructive">{m.error}</p>}
+                    {m.via && !(busy && i === messages.length - 1) && (
+                      <p className="mt-2 text-xs text-muted-foreground">{m.via}</p>
+                    )}
                   </div>
                 </div>
               ),
@@ -183,24 +261,34 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
       </div>
 
       <div className="border-t bg-background/85 backdrop-blur">
-        <form className="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-3"
+        <form className="mx-auto w-full max-w-3xl px-4 pt-3 pb-2"
           onSubmit={(e) => { e.preventDefault(); send(input); }}>
-          <label htmlFor="ask" className="sr-only">Your question</label>
-          <Textarea id="ask" value={input} onChange={(e) => setInput(e.target.value)} rows={1}
-            placeholder="Ask about your sleep, activity, heart rate..."
-            className="max-h-40 min-h-11 resize-none rounded-xl bg-card py-3"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
-            }} />
-          {busy ? (
-            <Button type="button" size="icon-lg" variant="outline" className="size-11 rounded-xl" onClick={() => abortRef.current?.abort()} aria-label="Stop">
-              <Square className="fill-current" />
-            </Button>
-          ) : (
-            <Button type="submit" size="icon-lg" className="size-11 rounded-xl" disabled={!input.trim()} aria-label="Send">
-              <ArrowUp />
-            </Button>
-          )}
+          <div className="flex items-end gap-2">
+            <label htmlFor="ask" className="sr-only">Your question</label>
+            <Textarea id="ask" value={input} onChange={(e) => setInput(e.target.value)} rows={1}
+              placeholder="Ask about your sleep, activity, heart rate..."
+              className="max-h-40 min-h-11 resize-none rounded-xl bg-card py-3"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
+              }} />
+            {busy ? (
+              <Button type="button" size="icon-lg" variant="outline" className="size-11 rounded-xl" onClick={() => abortRef.current?.abort()} aria-label="Stop">
+                <Square className="fill-current" />
+              </Button>
+            ) : (
+              <Button type="submit" size="icon-lg" className="size-11 rounded-xl" disabled={!input.trim()} aria-label="Send">
+                <ArrowUp />
+              </Button>
+            )}
+          </div>
+          <div className="mt-1.5 -ml-2.5 flex flex-wrap items-center gap-0.5">
+            <Picker icon={Brain} title="Model" label={modelInfo.label} value={model} options={MODELS}
+              onChange={(v) => { setModel(v); store(MODEL_KEY, v); }} />
+            {hasEffort && (
+              <Picker icon={Gauge} title="Effort" label={`${effortLabel} effort`} value={effort} options={EFFORTS}
+                onChange={(v) => { setEffort(v); store(EFFORT_KEY, v); }} />
+            )}
+          </div>
         </form>
       </div>
     </div>

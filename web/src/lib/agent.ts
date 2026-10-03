@@ -4,13 +4,13 @@ import {
   createSdkMcpServer, query, tool, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { DEFAULT_EFFORT, DEFAULT_MODEL, supportsEffort, type Effort, type ModelId } from "./models";
 import { getReadonlyDb } from "./db";
 import {
   dailyMetric, dailySampleStats, dataCoverage, exercises, listDays,
 } from "./queries";
 import { dailyScores, nights, restingHeartRate } from "./analytics";
 
-const MODEL = "claude-opus-5-5";
 const MAX_ROWS = 300;
 
 const SCHEMA_DOC = `
@@ -209,20 +209,27 @@ export function agentBackend(): "api" | "claude-code" {
  * Runs the agent over the conversation and yields text deltas and tool activity as they happen.
  * History is sent as plain text turns; the agent re-queries data each turn rather than relying on old tool results.
  */
-export function runAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
-  return agentBackend() === "api" ? runApiAgent(history) : runClaudeCodeAgent(history);
+export type AgentOptions = { model?: ModelId; effort?: Effort };
+
+export function runAgent(history: ChatTurn[], opts: AgentOptions = {}): AsyncGenerator<AgentEvent> {
+  const model = opts.model ?? DEFAULT_MODEL;
+  // Haiku has no effort control; sending one is an error.
+  const effort = supportsEffort(model) ? (opts.effort ?? DEFAULT_EFFORT) : undefined;
+  return agentBackend() === "api" ? runApiAgent(history, model, effort) : runClaudeCodeAgent(history, model, effort);
 }
 
-async function* runApiAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
+async function* runApiAgent(history: ChatTurn[], model: ModelId, effort?: Effort): AsyncGenerator<AgentEvent> {
   const client = new Anthropic();
 
   let runner = client.beta.messages.toolRunner({
-    model: MODEL,
+    model,
     max_tokens: 64000,
-    output_config: { effort: "medium" },
-    // On a safety-classifier decline, the API re-runs the request on an appropriate fallback model.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...(effort && {
+      output_config: { effort },
+      // On a safety-classifier decline, the API re-runs the request on an appropriate fallback model.
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default" as const,
+    }),
     system: [
       { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
       { type: "text", text: todayLine() },
@@ -293,7 +300,7 @@ function promptFromHistory(history: ChatTurn[]) {
  * Built-in tools, user settings, plugins and other MCP servers are all switched off: the model
  * only sees the three read-only health tools.
  */
-async function* runClaudeCodeAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
+async function* runClaudeCodeAgent(history: ChatTurn[], model: ModelId, effort?: Effort): AsyncGenerator<AgentEvent> {
   const abortController = new AbortController();
   // Without a key in its environment, Claude Code uses its own login rather than the API.
   const env = { ...process.env };
@@ -302,8 +309,8 @@ async function* runClaudeCodeAgent(history: ChatTurn[]): AsyncGenerator<AgentEve
   const run = query({
     prompt: promptFromHistory(history),
     options: {
-      model: MODEL,
-      effort: "medium",
+      model,
+      effort,
       systemPrompt: [SYSTEM, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, todayLine()],
       tools: [],
       mcpServers: { [MCP_SERVER]: healthServer },

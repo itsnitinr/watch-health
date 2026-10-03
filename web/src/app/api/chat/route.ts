@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { runAgent, type ChatTurn } from "@/lib/agent";
+import { isEffort, isModelId } from "@/lib/models";
 
 export const maxDuration = 300;
 
@@ -15,7 +16,7 @@ function errorMessage(e: unknown) {
 
 /** Streams agent events as newline-delimited JSON. */
 export async function POST(req: Request) {
-  const { messages } = (await req.json()) as { messages: ChatTurn[] };
+  const { messages, model, effort } = (await req.json()) as { messages: ChatTurn[]; model?: unknown; effort?: unknown };
   if (!Array.isArray(messages) || messages.length === 0 || messages.at(-1)?.role !== "user") {
     return Response.json({ error: "messages must end with a user turn" }, { status: 400 });
   }
@@ -25,7 +26,8 @@ export async function POST(req: Request) {
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
-        for await (const event of runAgent(messages)) {
+        const opts = { model: isModelId(model) ? model : undefined, effort: isEffort(effort) ? effort : undefined };
+        for await (const event of runAgent(messages, opts)) {
           if (req.signal.aborted) break;
           send(event);
         }
