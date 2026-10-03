@@ -64,6 +64,17 @@ CREATE TABLE IF NOT EXISTS exercise_sessions (
 );
 CREATE INDEX IF NOT EXISTS exercise_start ON exercise_sessions (start_ms);
 
+-- GPS points recorded during a workout, from Health Connect's exercise route.
+CREATE TABLE IF NOT EXISTS exercise_routes (
+  session_uid TEXT NOT NULL,
+  t           INTEGER NOT NULL,     -- epoch ms
+  lat         REAL NOT NULL,
+  lng         REAL NOT NULL,
+  alt_m       REAL,
+  accuracy_m  REAL,                 -- horizontal accuracy
+  PRIMARY KEY (session_uid, t)
+);
+
 CREATE TABLE IF NOT EXISTS sync_state (
   key    TEXT PRIMARY KEY,
   value  TEXT NOT NULL

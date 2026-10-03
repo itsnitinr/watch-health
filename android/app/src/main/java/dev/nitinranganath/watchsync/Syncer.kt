@@ -2,7 +2,6 @@ package dev.nitinranganath.watchsync
 
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.permission.HealthPermission
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Duration
@@ -16,6 +15,9 @@ class ConfigException(message: String) : Exception(message)
 object Syncer {
     /** Re-read this much before the last sync, to pick up data the watch delivered late. */
     private val OVERLAP = Duration.ofDays(2)
+
+    /** Never read further back than this, even on a first sync or a re-sync. */
+    val MAX_HISTORY: Duration = Duration.ofDays(30)
 
     /** Data is read and uploaded one window at a time, and progress is saved after each. */
     private const val WINDOW_DAYS = 14L
@@ -38,13 +40,11 @@ object Syncer {
 
         val zone = ZoneId.systemDefault()
         val now = Instant.now()
-        val from = if (settings.lastSyncMs == 0L) {
-            // First sync: go back as far as Health Connect allows us.
-            val days = if (HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted) 365L else 30L
-            now.minus(Duration.ofDays(days))
-        } else {
-            Instant.ofEpochMilli(settings.lastSyncMs).minus(OVERLAP)
-        }
+        // First sync (or a re-sync) starts 30 days back; later ones pick up where the last left
+        // off, but never reach further back than 30 days either.
+        val earliest = now.minus(MAX_HISTORY)
+        val from = if (settings.lastSyncMs == 0L) earliest
+        else maxOf(earliest, Instant.ofEpochMilli(settings.lastSyncMs).minus(OVERLAP))
 
         // Align windows to local midnight so daily totals always cover whole days.
         val windows = buildList {
@@ -57,7 +57,7 @@ object Syncer {
         }
 
         val uploader = Uploader(settings.serverUrl, settings.token)
-        val totals = mutableMapOf("samples" to 0, "daily" to 0, "sleep" to 0, "exercise" to 0)
+        val totals = mutableMapOf("samples" to 0, "daily" to 0, "sleep" to 0, "exercise" to 0, "routes" to 0)
         val day = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(zone)
 
         windows.forEachIndexed { i, (start, end) ->
@@ -73,7 +73,7 @@ object Syncer {
 
         val time = DateTimeFormatter.ofPattern("d MMM HH:mm").withZone(zone)
         val summary = "Synced ${time.format(now)}: ${totals["samples"]} samples, ${totals["daily"]} daily totals, " +
-            "${totals["sleep"]} sleep sessions, ${totals["exercise"]} workouts"
+            "${totals["sleep"]} sleep sessions, ${totals["exercise"]} workouts, ${totals["routes"]} GPS routes"
         settings.lastResult = summary
         summary
     }

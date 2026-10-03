@@ -5,7 +5,7 @@
     <!-- Android 17+: required to connect to the dashboard on the home network (192.168.x.x). -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
-    <!-- Health Connect read permissions. Keep in sync with HealthReader.PERMISSIONS. -->
+    <!-- Health Connect read permissions. Keep in sync with HealthReader.RECORD_TYPES. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_FLOORS_CLIMBED" />
@@ -24,9 +24,25 @@
     <uses-permission android:name="android.permission.health.READ_VO2_MAX" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
-    <!-- Let the periodic worker read while the app isn't open, and allow importing >30 days of history. -->
+    <uses-permission android:name="android.permission.health.READ_SPEED" />
+    <uses-permission android:name="android.permission.health.READ_STEPS_CADENCE" />
+    <uses-permission android:name="android.permission.health.READ_ELEVATION_GAINED" />
+    <uses-permission android:name="android.permission.health.READ_POWER" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+    <uses-permission android:name="android.permission.health.READ_HEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BONE_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BODY_WATER_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BODY_TEMPERATURE" />
+    <uses-permission android:name="android.permission.health.READ_BASAL_BODY_TEMPERATURE" />
+    <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
+    <uses-permission android:name="android.permission.health.READ_HYDRATION" />
+    <uses-permission android:name="android.permission.health.READ_NUTRITION" />
+    <uses-permission android:name="android.permission.health.READ_MINDFULNESS" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVITY_INTENSITY" />
+    <!-- Let the periodic worker read while the app isn't open. Syncs never reach back more than
+         30 days, so the separate permission for older history isn't requested. -->
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
-    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
 
     <queries>
         <package android:name="com.google.android.apps.healthdata" />

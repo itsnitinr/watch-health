@@ -44,11 +44,17 @@ export type ExerciseSession = {
   meta?: Record<string, unknown> | null;
 };
 
+export type RoutePoint = { t: number; lat: number; lng: number; alt_m?: number | null; accuracy_m?: number | null };
+
+/** A workout's full GPS route; replaces any route stored for that session. */
+export type ExerciseRoute = { session_uid: string; points: RoutePoint[] };
+
 export type IngestPayload = {
   samples?: Sample[];
   daily?: DailyMetric[];
   sleep?: SleepSession[];
   exercise?: ExerciseSession[];
+  routes?: ExerciseRoute[];
 };
 
 const json = (v: unknown) => (v == null ? null : JSON.stringify(v));
@@ -76,7 +82,12 @@ export function ingest(payload: IngestPayload) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
-  const counts = { samples: 0, daily: 0, sleep: 0, exercise: 0 };
+  const delRoute = db.prepare(`DELETE FROM exercise_routes WHERE session_uid = ?`);
+  const insRoute = db.prepare(
+    `INSERT OR REPLACE INTO exercise_routes (session_uid, t, lat, lng, alt_m, accuracy_m) VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+
+  const counts = { samples: 0, daily: 0, sleep: 0, exercise: 0, routes: 0 };
 
   transaction(() => {
     for (const s of payload.samples ?? []) {
@@ -106,6 +117,14 @@ export function ingest(payload: IngestPayload) {
         e.distance_m ?? null, e.avg_hr ?? null, e.max_hr ?? null, e.source ?? null, json(e.meta),
       );
       counts.exercise++;
+    }
+    for (const r of payload.routes ?? []) {
+      delRoute.run(r.session_uid);
+      for (const p of r.points) {
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+        insRoute.run(r.session_uid, p.t, p.lat, p.lng, p.alt_m ?? null, p.accuracy_m ?? null);
+      }
+      counts.routes++;
     }
   });
 

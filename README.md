@@ -44,8 +44,9 @@ add a handler in `web/scripts/import-shealth.ts`.
 3. In **Watch Sync**: enter `http://<this computer's LAN IP>:3000` and the `INGEST_TOKEN`, then tap
    **Grant access** and **Sync now**. Turn on hourly auto-sync if you want.
 
-The first sync reads 30 days back, or a year if Health Connect grants history access. Later syncs
-read from the last sync, with a 2-day overlap to catch data the watch delivered late. Background
+The app never reads more than 30 days back: the first sync (and **Re-sync last 30 days**) starts
+there, and later syncs read from the last sync, with a 2-day overlap to catch data the watch
+delivered late. Older history comes from the Samsung Health export above. Background
 sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
 
 ## Pages
@@ -66,8 +67,8 @@ highest HR recorded in a workout) and `HEIGHT_CM` (stride length for distance).
 Samsung Health only shares workout distance with Health Connect, so daily distance is the larger
 of that and steps × stride (0.415 × height, or 0.76 m). Workouts the watch detected on its own
 (short walks and "other" activities) are hidden on the Workouts page by default; they still count
-as exercise. The Android app sends each workout's recording method; tap **Re-sync all history**
-once after updating the app so older workouts get it too.
+as exercise. The Android app sends each workout's recording method; tap **Re-sync last 30 days**
+once after updating the app so recent workouts get it too.
 
 ## The assistant
 
@@ -83,10 +84,11 @@ plugins and MCP servers are switched off for these requests. Set `ANTHROPIC_API_
 
 | Table | Holds |
 |---|---|
-| `samples` | heart rate, resting HR, HRV, SpO₂, weight, body fat, BP, VO₂ max, … (one row per measurement) |
+| `samples` | heart rate, resting HR, HRV, SpO₂, weight, body composition, BP, VO₂ max, steps and distance in short intervals, speed / cadence / power / elevation during workouts, hydration, nutrition, … (one row per measurement) |
 | `daily_metrics` | steps, distance, calories, floors as per-day totals (de-duplicated across phone + watch) |
 | `sleep_sessions` / `sleep_stages` | nights and their deep / light / REM / awake segments |
-| `exercise_sessions` | workouts with duration, distance, calories, avg / max HR |
+| `exercise_sessions` | workouts with duration, distance, calories, avg / max HR; laps, segments and effort in `meta` |
+| `exercise_routes` | GPS points recorded during workouts |
 
 ## Notes
 

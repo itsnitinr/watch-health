@@ -39,7 +39,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -47,6 +51,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.contracts.ExerciseRouteRequestContract
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.launch
@@ -152,7 +157,7 @@ private fun SyncScreen() {
                 if (needsLocalNetworkPermission(context)) localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
                 else startSync()
             }) { Text(if (busy) "Syncing…" else "Sync now") }
-            // Reads everything again (up to a year), e.g. to fill in details added in a newer app version.
+            // Reads the last 30 days again, e.g. to fill in details added in a newer app version.
             // Uploads are upserts, so nothing is duplicated.
             OutlinedButton(enabled = !busy, onClick = {
                 settings.serverUrl = url
@@ -160,7 +165,7 @@ private fun SyncScreen() {
                 settings.lastSyncMs = 0
                 if (needsLocalNetworkPermission(context)) localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
                 else startSync()
-            }) { Text("Re-sync all history") }
+            }) { Text("Re-sync last 30 days") }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -173,6 +178,60 @@ private fun SyncScreen() {
         }
 
         (liveStatus ?: status).takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        RunCheckSection(reader.client)
+    }
+}
+
+/**
+ * Shows what Health Connect holds for the latest run (route, laps, how finely distance and speed
+ * were recorded), so we know what per-km splits and maps could be built from. Reads only.
+ */
+@Composable
+private fun RunCheckSection(client: HealthConnectClient) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboard.current
+    var result by remember { mutableStateOf<RunCheck.Result?>(null) }
+    var routeLine by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+
+    // Samsung's routes belong to Samsung Health, so Health Connect asks you per run before sharing one
+    val routeLauncher = rememberLauncherForActivityResult(ExerciseRouteRequestContract()) { route ->
+        routeLine = "GPS route after allowing: " + if (route == null) "not shared, or none recorded" else RunCheck.describeRoute(route)
+    }
+
+    Text("4. Check run detail", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Looks at your latest run to see what Health Connect has for splits and maps. Nothing is uploaded.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(enabled = !checking, onClick = {
+            checking = true
+            routeLine = null
+            scope.launch {
+                result = try {
+                    RunCheck.latestRun(client)
+                } catch (e: Exception) {
+                    RunCheck.Result("Check failed: ${e.message}", null, false)
+                }
+                checking = false
+            }
+        }) { Text(if (checking) "Checking…" else "Check latest run") }
+        result?.let { r ->
+            OutlinedButton(onClick = {
+                val text = listOfNotNull(r.report, routeLine).joinToString("\n")
+                scope.launch { clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("Run check", text))) }
+            }) { Text("Copy") }
+        }
+    }
+    result?.let { r ->
+        if (r.routeNeedsConsent && r.sessionId != null && routeLine == null) {
+            Button(onClick = { routeLauncher.launch(r.sessionId) }) { Text("Allow reading this run's route") }
+        }
+        SelectionContainer {
+            Text(listOfNotNull(r.report, routeLine).joinToString("\n"), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
     }
 }
 
