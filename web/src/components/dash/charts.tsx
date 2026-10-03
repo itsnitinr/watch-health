@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, type TooltipContentProps,
 } from "recharts";
 import { STAGES, ZONE_COLORS } from "@/lib/palette";
-import { fmtClock, fmtDay, fmtMinutes, fmtNum, fmtPeriod, fmtTimeOfNight, titleCase, type Period } from "@/lib/format";
+import { fmtClock, fmtDay, fmtMinutes, fmtNum, fmtPaceSec, fmtPeriod, fmtTimeOfNight, titleCase, type Period } from "@/lib/format";
 
 type Point = { day: string; value: number | null };
 type ValueFormat = "number" | "minutes";
@@ -584,5 +584,55 @@ export function StrainBuild({ points, from, to, bands = [], target, height = 220
           isAnimationActive={false} activeDot={{ r: 4, fill: color, stroke: "var(--card)", strokeWidth: 2 }} />
       </AreaChart>
     </ResponsiveContainer>
+  );
+}
+
+/** Pace (faster is higher) and heart rate along a run, by distance. */
+export function PaceChart({ data, height = 260 }: {
+  data: { km: number; t: number; pace: number | null; hr: number | null }[]; height?: number;
+}) {
+  const paces = data.map((p) => p.pace).filter((v): v is number => v != null).sort((a, b) => a - b);
+  // Scale to the bulk of the run, so a walk break doesn't squash everything else
+  const lo = paces.length ? Math.floor(paces[0] / 30) * 30 : 300;
+  const hi = paces.length ? Math.ceil(paces[Math.floor(paces.length * 0.95)] / 30) * 30 + 30 : 600;
+  const step = hi - lo > 300 ? 60 : 30;
+  const paceTicks = Array.from({ length: Math.floor((hi - lo) / step) + 1 }, (_, i) => lo + i * step);
+  const hrs = data.map((p) => p.hr).filter((v): v is number => v != null);
+  const total = data.at(-1)?.km ?? 1;
+  return (
+    <div className="space-y-2">
+      <Legend items={[
+        { label: "Pace (30 s average)", color: "var(--exercise)", shape: "line" },
+        { label: "Heart rate", color: "var(--heart)", shape: "line" },
+      ]} />
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ ...MARGIN, right: 0 }}>
+          {GRID}
+          <XAxis dataKey="km" type="number" domain={[0, total]} {...AXIS} tickFormatter={(v: number) => `${v.toFixed(v % 1 ? 1 : 0)} km`}
+            ticks={Array.from({ length: Math.floor(total) + 1 }, (_, i) => i)} />
+          <YAxis yAxisId="pace" {...AXIS} axisLine={false} width={40} reversed domain={[lo, hi]} ticks={paceTicks} allowDataOverflow
+            tickFormatter={(v: number) => fmtPaceSec(v)} />
+          <YAxis yAxisId="hr" orientation="right" {...AXIS} axisLine={false} width={32}
+            domain={hrs.length ? [Math.floor(Math.min(...hrs) / 10) * 10 - 10, Math.ceil(Math.max(...hrs) / 10) * 10] : ["auto", "auto"]} />
+          <Tooltip
+            cursor={{ stroke: "var(--chart-axis)", strokeWidth: 1 }}
+            content={({ active, payload }: TooltipContentProps) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0].payload as (typeof data)[number];
+              return (
+                <TooltipBox title={`${p.km.toFixed(2)} km · ${fmtClock(p.t)}`} rows={[
+                  { label: "/km", value: p.pace != null ? fmtPaceSec(p.pace) : "stopped", color: "var(--exercise)" },
+                  ...(p.hr != null ? [{ label: "bpm", value: String(Math.round(p.hr)), color: "var(--heart)" }] : []),
+                ]} />
+              );
+            }}
+          />
+          <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--heart)" strokeWidth={1.5} strokeOpacity={0.7} dot={false}
+            connectNulls isAnimationActive={false} />
+          <Line yAxisId="pace" type="monotone" dataKey="pace" stroke="var(--exercise)" strokeWidth={2.25} dot={false}
+            isAnimationActive={false} activeDot={{ r: 4, fill: "var(--exercise)", stroke: "var(--card)", strokeWidth: 2 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { IntradayHr, ZoneBars } from "@/components/dash/charts";
+import { RunPanels } from "@/components/dash/run";
 import { ZONE_COLORS } from "@/lib/palette";
 import { EmptyHint, Panel, StatTile } from "@/components/dash/primitives";
 import { PageBody, PageHeader } from "@/components/page-header";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/analytics";
 import { getDb } from "@/lib/db";
 import { fmtClock, fmtDay, fmtLongDay, fmtMinutes, fmtNum, fmtPace, titleCase } from "@/lib/format";
+import { runDetail } from "@/lib/run";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Workout" };
@@ -31,6 +33,7 @@ export default async function WorkoutPage({ params }: PageProps<"/workouts/[id]"
   const durationMs = w.end_ms - w.start_ms;
   const day = localDay(w.start_ms);
   const isDistance = !!w.distance_m && w.distance_m > 500;
+  const run = isDistance ? runDetail(w, hr) : null;
   const name = w.title ?? titleCase(w.type);
 
   // Other sessions of the same activity, for context
@@ -75,6 +78,8 @@ export default async function WorkoutPage({ params }: PageProps<"/workouts/[id]"
           <StatTile label="Training load" icon={Gauge} domain="exercise" value={load != null ? Math.round(load) : "-"}
             footer={vs(typical.load, (x) => `${Math.round(x)}`)} />
         </div>
+
+        {run && <RunPanels run={run} />}
 
         <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
           <Panel title="Heart rate" icon={HeartPulse} domain="heart" description="Shaded bands are your heart-rate zones">

@@ -27,10 +27,13 @@ export const fmtPeriod = (day: string, period: Period) => {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 };
 
-export const fmtPace = (durationMs: number, meters: number) => {
-  const secPerKm = durationMs / 1000 / (meters / 1000);
-  return `${Math.floor(secPerKm / 60)}:${String(Math.round(secPerKm % 60)).padStart(2, "0")} /km`;
+/** Seconds per km → "7:48" (rounded to the second first, so 7:59.6 shows as 8:00). */
+export const fmtPaceSec = (secPerKm: number) => {
+  const s = Math.round(secPerKm);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
+
+export const fmtPace = (durationMs: number, meters: number) => `${fmtPaceSec(durationMs / 1000 / (meters / 1000))} /km`;
 
 export const fmtLongDay = (day: string) =>
   new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
