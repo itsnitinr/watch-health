@@ -1,5 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+import {
+  createSdkMcpServer, query, tool, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+} from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { getReadonlyDb } from "./db";
 import {
@@ -59,12 +62,21 @@ function localDate(d = new Date()) {
 
 const round = (n: number | null | undefined, d = 0) => (n == null ? null : Number(n.toFixed(d)));
 
-export const agentTools = [
-  betaZodTool({
+/** Tool definitions shared by both backends (API tool runner and Claude Code). */
+type ToolDef<S extends z.ZodRawShape> = {
+  name: string;
+  description: string;
+  inputSchema: S;
+  run: (input: z.infer<z.ZodObject<S>>) => Promise<string>;
+};
+const defineTool = <S extends z.ZodRawShape>(def: ToolDef<S>) => def;
+
+const toolDefs = [
+  defineTool({
     name: "get_data_coverage",
     description:
       "Lists which kinds of data exist, how many records, and the date range covered. Call this first when unsure what is available.",
-    inputSchema: z.object({}),
+    inputSchema: {},
     run: async () => {
       const cov = dataCoverage();
       const types = getReadonlyDb()
@@ -82,15 +94,15 @@ export const agentTools = [
     },
   }),
 
-  betaZodTool({
+  defineTool({
     name: "get_daily_summary",
     description:
       "One row per local day with steps, sleep (total asleep minutes, deep/REM/light/awake minutes, score), resting heart rate, " +
       "average HRV, average SpO2, weight, and workouts. Best for overviews and day-to-day comparisons. Max 120 days per call.",
-    inputSchema: z.object({
+    inputSchema: {
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Start date, inclusive, YYYY-MM-DD"),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("End date, inclusive, YYYY-MM-DD"),
-    }),
+    },
     run: async ({ from, to }) => {
       const days = listDays({ from, to });
       if (days.length > 120) return "Range too large: request at most 120 days per call.";
@@ -139,14 +151,14 @@ export const agentTools = [
     },
   }),
 
-  betaZodTool({
+  defineTool({
     name: "query_sql",
     description:
       `Run one read-only SQLite SELECT (or WITH ... SELECT) against the health database and get rows back as JSON. ` +
       `Results are capped at ${MAX_ROWS} rows, so aggregate in SQL rather than pulling raw heart-rate samples.`,
-    inputSchema: z.object({
+    inputSchema: {
       sql: z.string().describe("A single SELECT statement"),
-    }),
+    },
     run: async ({ sql }) => {
       const trimmed = sql.trim().replace(/;\s*$/, "");
       if (!/^(select|with)\b/i.test(trimmed) || trimmed.includes(";")) {
@@ -168,6 +180,10 @@ export const agentTools = [
   }),
 ];
 
+export const agentTools = toolDefs.map((t) =>
+  betaZodTool({ name: t.name, description: t.description, inputSchema: z.object(t.inputSchema), run: t.run as (i: unknown) => Promise<string> }),
+);
+
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 export type AgentEvent =
@@ -177,13 +193,28 @@ export type AgentEvent =
 
 class TruncatedToolInput extends Error {}
 
+function todayLine() {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return `Today is ${localDate()} (${new Date().toLocaleDateString("en", { weekday: "long" })}), timezone ${tz}.`;
+}
+
+/** Which backend answers: the Anthropic API when a key is configured, otherwise the local Claude Code login. */
+export function agentBackend(): "api" | "claude-code" {
+  const forced = process.env.AGENT_BACKEND;
+  if (forced === "api" || forced === "claude-code") return forced;
+  return process.env.ANTHROPIC_API_KEY ? "api" : "claude-code";
+}
+
 /**
  * Runs the agent over the conversation and yields text deltas and tool activity as they happen.
  * History is sent as plain text turns; the agent re-queries data each turn rather than relying on old tool results.
  */
-export async function* runAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
+export function runAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
+  return agentBackend() === "api" ? runApiAgent(history) : runClaudeCodeAgent(history);
+}
+
+async function* runApiAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
   const client = new Anthropic();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   let runner = client.beta.messages.toolRunner({
     model: MODEL,
@@ -194,7 +225,7 @@ export async function* runAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent>
     fallbacks: "default",
     system: [
       { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
-      { type: "text", text: `Today is ${localDate()} (${new Date().toLocaleDateString("en", { weekday: "long" })}), timezone ${tz}.` },
+      { type: "text", text: todayLine() },
     ],
     tools: agentTools.map((t) => ({ ...t, eager_input_streaming: true })),
     messages: history.map((t) => ({ role: t.role, content: t.content })),
@@ -230,5 +261,90 @@ export async function* runAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent>
       if (err instanceof Anthropic.APIError || err instanceof TruncatedToolInput || attempt >= 2) throw err;
       runner = client.beta.messages.toolRunner({ ...runner.params });
     }
+  }
+}
+
+const MCP_SERVER = "health";
+const MCP_PREFIX = `mcp__${MCP_SERVER}__`;
+
+const healthServer = createSdkMcpServer({
+  name: MCP_SERVER,
+  alwaysLoad: true,
+  tools: toolDefs.map((t) =>
+    tool(t.name, t.description, t.inputSchema, async (input) => ({
+      content: [{ type: "text" as const, text: await t.run(input as never) }],
+    }), { annotations: { readOnlyHint: true } }),
+  ),
+});
+
+/** Claude Code takes a single prompt per query, so earlier turns are folded into it as a transcript. */
+function promptFromHistory(history: ChatTurn[]) {
+  const last = history.at(-1)!.content;
+  if (history.length === 1) return last;
+  const earlier = history
+    .slice(0, -1)
+    .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
+    .join("\n\n");
+  return `<conversation_so_far>\n${earlier}\n</conversation_so_far>\n\n${last}`;
+}
+
+/**
+ * Same agent, run through the locally installed Claude Code (its claude.ai login pays for it).
+ * Built-in tools, user settings, plugins and other MCP servers are all switched off: the model
+ * only sees the three read-only health tools.
+ */
+async function* runClaudeCodeAgent(history: ChatTurn[]): AsyncGenerator<AgentEvent> {
+  const abortController = new AbortController();
+  // Without a key in its environment, Claude Code uses its own login rather than the API.
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+
+  const run = query({
+    prompt: promptFromHistory(history),
+    options: {
+      model: MODEL,
+      effort: "medium",
+      systemPrompt: [SYSTEM, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, todayLine()],
+      tools: [],
+      mcpServers: { [MCP_SERVER]: healthServer },
+      strictMcpConfig: true,
+      allowedTools: toolDefs.map((t) => MCP_PREFIX + t.name),
+      permissionMode: "dontAsk",
+      settingSources: [],
+      persistSession: false,
+      includePartialMessages: true,
+      maxTurns: 15,
+      abortController,
+      env: { ...env, CLAUDE_AGENT_SDK_CLIENT_APP: "gw-dashboard" },
+    },
+  });
+
+  try {
+    for await (const msg of run) {
+      if (msg.type === "stream_event" && msg.parent_tool_use_id === null) {
+        const ev = msg.event;
+        if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+          yield { type: "text", text: ev.delta.text };
+        }
+      } else if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
+        const toolUses = msg.message.content.filter((b) => b.type === "tool_use");
+        for (const t of toolUses) yield { type: "tool", name: t.name.replace(MCP_PREFIX, ""), input: t.input };
+        if (toolUses.length) yield { type: "text", text: "\n\n" };
+      } else if (msg.type === "auth_status" && msg.error) {
+        yield { type: "error", message: `Claude Code is not logged in (${msg.error}). Run \`claude\` and /login, then retry.` };
+        return;
+      } else if (msg.type === "result") {
+        if (msg.subtype !== "success") {
+          yield { type: "error", message: msg.subtype === "error_max_turns" ? "Stopped after too many data lookups." : `Claude Code error: ${msg.subtype}` };
+        } else if (msg.is_error) {
+          yield { type: "error", message: msg.result || "Claude Code returned an error." };
+        } else if (msg.stop_reason === "refusal") {
+          yield { type: "error", message: "The model declined to answer this request." };
+        }
+        return;
+      }
+    }
+  } finally {
+    abortController.abort();
   }
 }

@@ -2,7 +2,7 @@
 
 A private dashboard for Galaxy Watch 7 data, plus an AI assistant that answers questions about it.
 Everything runs on your own computer; health data never leaves it, except the rows the assistant
-reads while answering a question, which are sent to the Anthropic API.
+reads while answering a question, which are sent to Anthropic (via Claude Code or the API).
 
 ```
 Galaxy Watch → Samsung Health → Health Connect → android/ (Watch Sync app)
@@ -19,7 +19,7 @@ Requires Node 22.5+ (it uses the built-in `node:sqlite`).
 ```sh
 cd web
 npm install
-cp .env.example .env.local   # then fill in ANTHROPIC_API_KEY and INGEST_TOKEN (openssl rand -hex 24)
+cp .env.example .env.local   # then fill in INGEST_TOKEN (openssl rand -hex 24)
 npm run dev                  # http://localhost:3000, also reachable from your phone on the LAN
 ```
 
@@ -73,6 +73,11 @@ once after updating the app so older workouts get it too.
 
 `/chat` uses Claude (`claude-opus-5-5`) with three read-only tools: data coverage, a per-day summary,
 and SQL over a **read-only** connection to the database. Each lookup it makes is shown under its answer.
+
+By default it runs through the Claude Code installed on this machine (`claude` must be logged in), so
+your Claude subscription covers it and no API key is needed. Claude Code's own tools, settings,
+plugins and MCP servers are switched off for these requests. Set `ANTHROPIC_API_KEY` in
+`web/.env.local` to call the Anthropic API directly instead, or `AGENT_BACKEND=api|claude-code` to force one.
 
 ## Data model
 
