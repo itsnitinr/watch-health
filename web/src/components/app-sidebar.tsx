@@ -22,7 +22,7 @@ export function AppSidebar({ lastSync }: { lastSync: string | null }) {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>

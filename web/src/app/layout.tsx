@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <TooltipProvider delayDuration={200}>
             <SidebarProvider>
               <AppSidebar lastSync={last ? fmtAgo(Date.parse(last), nowMs()) : null} />
-              <SidebarInset>{children}</SidebarInset>
+              <SidebarInset className="md:h-[calc(100svh-1rem)] md:overflow-y-auto md:border">{children}</SidebarInset>
             </SidebarProvider>
           </TooltipProvider>
         </ThemeProvider>
