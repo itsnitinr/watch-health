@@ -1,8 +1,9 @@
 /**
- * Sleep, Energy and Activity scores.
+ * Sleep, Energy, Strain and Activity scores.
  *
- * Every score is 0-100 and is a weighted average of a few named parts, each itself 0-100, so
- * the UI can always show why a score is what it is. Personal parts are judged against your own
+ * Every score is 0-100. Sleep, Energy and Activity are weighted averages of a few named parts,
+ * each itself 0-100, so the UI can always show why a score is what it is. Strain is different:
+ * it measures how much load the day put on your heart, so higher is not better. Personal parts are judged against your own
  * recent norm (30-day usual) rather than population values. A part that can't be computed
  * (e.g. no sleep stages that night) is left out and the remaining weights are rescaled.
  *
@@ -41,6 +42,9 @@ export function combine(parts: ScorePart[]): Score {
     parts: parts.map((p) => ({ ...p, score: p.score == null ? null : Math.round(p.score) })),
   };
 }
+
+/** A score's verbal band; the tone colours it. */
+export type Band = { label: string; tone: "good" | "warn" | "bad" | "neutral" };
 
 export const BANDS = [
   { min: 85, label: "Excellent", tone: "good" },
@@ -180,6 +184,71 @@ export const ENERGY_ADVICE: Record<(typeof BANDS)[number]["label"], string> = {
   Low: "Your body is under strain. Prioritise rest and sleep.",
 };
 
+export const SLEEP_ADVICE: Record<(typeof BANDS)[number]["label"], string> = {
+  Excellent: "A full, restful night.",
+  Good: "A solid night's sleep.",
+  Fair: "Short or broken sleep. An earlier night would help.",
+  Low: "Poor sleep. Go easy and make tonight a priority.",
+};
+
+// ---------------------------------------------------------------------------------------------
+
+export type StrainInput = {
+  hrLoad: number; // Banister load from every heart-rate reading of the day above resting effort
+  workoutLoad: number; // the same, from workout average heart rate
+  workoutCount: number;
+  workoutMin: number;
+  raisedMin: number; // minutes of the day with heart rate at or above 30% of reserve
+};
+
+/**
+ * Load needed for a given strain, rising steeply at first and then flattening, the way each extra
+ * hour of hard effort adds less: an easy 30-minute walk is about 20, a 45-minute run about 60,
+ * and only very long or very hard days pass 90.
+ */
+const STRAIN_CURVE: [number, number][] = [[0, 0], [10, 10], [30, 25], [60, 40], [100, 55], [150, 67], [220, 80], [320, 90], [500, 98]];
+
+export const STRAIN_BANDS = [
+  { min: 80, label: "All out", tone: "neutral" },
+  { min: 55, label: "High", tone: "neutral" },
+  { min: 30, label: "Moderate", tone: "neutral" },
+  { min: 0, label: "Light", tone: "neutral" },
+] as const;
+export const strainBand = (score: number) => STRAIN_BANDS.find((b) => score >= b.min)!;
+
+export function strainScore(s: StrainInput): Score {
+  // Heart-rate readings cover workouts too, but a workout logged without readings still counts
+  // through its average heart rate.
+  const total = Math.max(s.hrLoad, s.workoutLoad);
+  const other = Math.max(0, total - s.workoutLoad);
+  return {
+    score: Math.round(interp(total, STRAIN_CURVE)),
+    parts: [
+      {
+        key: "workouts", label: "Workouts", weight: total ? Math.round((s.workoutLoad / total) * 100) : 0,
+        score: Math.round(interp(Math.min(s.workoutLoad, total), STRAIN_CURVE)),
+        detail: s.workoutCount ? `${s.workoutCount} workout${s.workoutCount > 1 ? "s" : ""}, ${hm(s.workoutMin)}` : "No workouts",
+      },
+      {
+        key: "everyday", label: "Rest of the day", weight: total ? Math.round((other / total) * 100) : 0,
+        score: Math.round(interp(other, STRAIN_CURVE)),
+        detail: "Walking, stairs and other raised heart rate",
+      },
+      {
+        key: "raised", label: "Raised heart rate", weight: 0,
+        score: Math.round(interp(s.raisedMin, [[0, 0], [30, 30], [60, 55], [120, 80], [180, 95], [240, 100]])),
+        detail: `${hm(s.raisedMin)} above 30% of your heart-rate reserve`,
+      },
+    ],
+  };
+}
+
+/** A strain range that suits how recovered you are, from the morning's energy score. */
+export function strainTarget(energy: number | null): [number, number] | null {
+  if (energy == null) return null;
+  return energy >= 85 ? [60, 85] : energy >= 70 ? [45, 70] : energy >= 55 ? [30, 50] : [10, 30];
+}
+
 // ---------------------------------------------------------------------------------------------
 
 export type ActivityInput = {
@@ -213,5 +282,6 @@ export function activityScore(a: ActivityInput): Score {
 export const SCORE_HELP = {
   sleep: "Combines how long you slept against your goal, how much of your time in bed you were asleep, your share of deep and REM sleep, and how close your bedtime was to your usual.",
   energy: "Estimates how recovered you are this morning from last night's sleep, your resting heart rate against your usual, your sleep over the past week, recent training load against your norm, and bedtime consistency. A resting heart rate 5+ bpm above your usual caps the score, since that often means illness or heavy fatigue.",
+  strain: "How much load the day put on your heart. Every heart-rate reading above about a third of your heart-rate reserve adds load, and harder efforts add far more per minute (Banister training load), so it covers workouts and everyday movement alike. The scale flattens near the top: light days sit under 30, a solid workout lands around 55 to 70, and only very long or very hard days pass 80. The target comes from your energy score: more recovered, more you can take on.",
   activity: "Mostly today's steps against your goal, plus exercise over the last 7 days against the recommended 150 minutes a week, and a little for exercising today. Rest days with good steps still score well.",
 } as const;

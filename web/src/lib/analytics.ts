@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { dailyMetric, dailySampleStats, listDays, sleepNights, type Range, type SleepNight } from "./queries";
-import { activityScore, energyScore, sleepScore, type Score, type ScorePart } from "./scores";
+import { activityScore, energyScore, sleepScore, strainScore, type Score, type ScorePart } from "./scores";
 
 // node:sqlite rows have a null prototype; copy them into plain objects so they can be
 // passed to client components.
@@ -443,12 +443,46 @@ export function timeInZones(hr: { t: number; bpm: number }[], endMs: number, max
   return secs;
 }
 
-/** Banister TRIMP: minutes × intensity, weighted exponentially so hard efforts count more. */
+/** Banister TRIMP for `minutes` at heart rate `bpm`, weighted exponentially so hard efforts count more. */
+const trimp = (minutes: number, bpm: number, maxHr: number, restHr: number) => {
+  const hrr = Math.min(1, Math.max(0, (bpm - restHr) / (maxHr - restHr)));
+  return minutes * hrr * 0.64 * Math.exp(1.92 * hrr);
+};
+
 export function trainingLoad(w: Workout, maxHr: number, restHr: number) {
   if (!w.avg_hr || maxHr <= restHr) return null;
-  const hrr = Math.min(1, Math.max(0, (w.avg_hr - restHr) / (maxHr - restHr)));
-  const minutes = (w.end_ms - w.start_ms) / 60000;
-  return minutes * hrr * 0.64 * Math.exp(1.92 * hrr);
+  return trimp((w.end_ms - w.start_ms) / 60000, w.avg_hr, maxHr, restHr);
+}
+
+/** Heart rate at or above this share of heart-rate reserve counts towards the day's strain. */
+const RAISED_HRR = 0.3;
+
+/**
+ * Per day, the training load from every heart-rate reading at or above RAISED_HRR, and the
+ * minutes spent there. Each reading counts until the next one, capped at 5 minutes so gaps in
+ * the data don't count as effort. Readings are binned by whole bpm in SQL to keep it cheap
+ * over long ranges.
+ */
+export function dailyHeartLoad(r: Range, maxHr: number, restHr: number) {
+  const floor = restHr + RAISED_HRR * (maxHr - restHr);
+  const rows = all<{ day: string; bpm: number; min: number }>(
+    `WITH hr AS (
+       SELECT start_ms AS t, value AS bpm, LEAD(start_ms) OVER (ORDER BY start_ms) AS nt FROM samples
+       WHERE type = 'heart_rate' AND start_ms >= ? AND start_ms < ?)
+     SELECT date(t / 1000, 'unixepoch', 'localtime') AS day, CAST(ROUND(bpm) AS INTEGER) AS bpm,
+            SUM(MIN(COALESCE(nt, t + 60000) - t, 300000)) / 60000.0 AS min
+     FROM hr WHERE bpm >= ? GROUP BY day, 2`,
+    dayStartMs(r.from), dayStartMs(shiftDay(r.to, 1)), floor,
+  );
+  const out = new Map<string, { load: number; minutes: number }>();
+  if (maxHr <= restHr) return out;
+  for (const x of rows) {
+    const cur = out.get(x.day) ?? { load: 0, minutes: 0 };
+    cur.load += trimp(x.min, x.bpm, maxHr, restHr);
+    cur.minutes += x.min;
+    out.set(x.day, cur);
+  }
+  return out;
 }
 
 export function workoutsWithZones(fromMs: number, toMs: number, maxHr: number, includeAuto = true) {
@@ -607,14 +641,15 @@ export function vo2History(beforeDay: string, n = 12) {
 // ---------------------------------------------------------------------------------------------
 // Daily scores
 
-export type DayScores = { day: string; sleep: Score | null; energy: Score; activity: Score };
+export type DayScores = { day: string; sleep: Score | null; energy: Score; strain: Score | null; activity: Score };
 
 /**
- * Sleep, Energy and Activity scores for every day in the range, computed in one pass from data
+ * Sleep, Energy, Strain and Activity scores for every day in the range, computed in one pass from data
  * loaded once (nights, resting heart rate, steps and workouts, plus the history each score
- * needs before the range starts).
+ * needs before the range starts). Strain reads every heart-rate reading in the range, which is
+ * slow over months, so it is only computed when asked for.
  */
-export function dailyScores(r: Range): Map<string, DayScores> {
+export function dailyScores(r: Range, { withStrain = false } = {}): Map<string, DayScores> {
   const hist = { from: shiftDay(r.from, -30), to: r.to };
   const ns = new Map(nights({ from: shiftDay(r.from, -7), to: r.to }).map((n) => [n.day, n]));
   const rhr = new Map(restingHeartRate(hist).map((x) => [x.day, x.value]));
@@ -623,10 +658,18 @@ export function dailyScores(r: Range): Map<string, DayScores> {
   const restHr = baselineRestingHr();
   const load = new Map<string, number>();
   const exMin = new Map<string, number>();
+  const workoutCount = new Map<string, number>();
+  const heart = withStrain ? dailyHeartLoad(r, maxHr, restHr) : new Map<string, { load: number; minutes: number }>();
+  const worn = new Set(!withStrain ? [] : all<{ day: string }>(
+    `SELECT DISTINCT date(start_ms / 1000, 'unixepoch', 'localtime') AS day FROM samples
+     WHERE type = 'heart_rate' AND start_ms >= ? AND start_ms < ?`,
+    dayStartMs(r.from), dayStartMs(shiftDay(r.to, 1)),
+  ).map((x) => x.day));
   for (const w of workoutsBetween(dayStartMs(shiftDay(r.from, -28)), dayStartMs(shiftDay(r.to, 1)))) {
     const d = localDay(w.start_ms);
     load.set(d, (load.get(d) ?? 0) + (trainingLoad(w, maxHr, restHr) ?? 0));
     exMin.set(d, (exMin.get(d) ?? 0) + (w.end_ms - w.start_ms) / 60000);
+    workoutCount.set(d, (workoutCount.get(d) ?? 0) + 1);
   }
   const sumDays = (m: Map<string, number>, end: string, n: number) => {
     let t = 0;
@@ -654,6 +697,14 @@ export function dailyScores(r: Range): Map<string, DayScores> {
         loadChronic: sumDays(load, yesterday, 28) / 28,
         bedOffMin: night?.bedOffMin ?? null,
       }),
+      // No heart-rate readings and no workouts means the watch wasn't worn, not a zero-strain day
+      strain: withStrain && (worn.has(day) || workoutCount.has(day)) ? strainScore({
+        hrLoad: heart.get(day)?.load ?? 0,
+        workoutLoad: load.get(day) ?? 0,
+        workoutCount: workoutCount.get(day) ?? 0,
+        workoutMin: exMin.get(day) ?? 0,
+        raisedMin: heart.get(day)?.minutes ?? 0,
+      }) : null,
       activity: activityScore({
         steps: steps.get(day) ?? null,
         stepGoal: GOALS.steps,

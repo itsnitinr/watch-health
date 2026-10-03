@@ -56,6 +56,7 @@
   --heart: #e34948;
   --body: #2a78d6;
   --energy: #c98a00;
+  --strain: #0b8fb3;
 
   --good: #15803d;
   --bad: #dc2626;
@@ -120,6 +121,7 @@
   --heart: #e66767;
   --body: #3987e5;
   --energy: #c98500;
+  --strain: #2ab0d4;
 
   --good: #22c55e;
   --bad: #f87171;
@@ -178,6 +180,7 @@
   --color-heart: var(--heart);
   --color-body: var(--body);
   --color-energy: var(--energy);
+  --color-strain: var(--strain);
   --color-good: var(--good);
   --color-bad: var(--bad);
   --color-warn: var(--warn);

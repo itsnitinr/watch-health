@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowRight, BedDouble, Droplets, Dumbbell, Flame, Footprints, Gauge, HeartPulse, Route, Scale, Sparkles, Target, Zap,
+  Activity, ArrowRight, BedDouble, Droplets, Dumbbell, Flame, Footprints, Gauge, HeartPulse, Route, Scale, Sparkles, Target,
 } from "lucide-react";
 import Link from "next/link";
 import { PageBody, PageHeader } from "@/components/page-header";
@@ -8,8 +8,8 @@ import { STAGES } from "@/lib/palette";
 import { DateNav } from "@/components/dash/date-nav";
 import { Delta, DOMAIN, EmptyHint, IconChip, KV, Panel, PanelLink, StatTile } from "@/components/dash/primitives";
 import { ProgressRings, StackedBar } from "@/components/dash/rings";
-import { ScoreDial, ScoreHelp, ScoreParts } from "@/components/dash/score";
-import { ENERGY_ADVICE, SCORE_HELP, band } from "@/lib/scores";
+import { ScoreHelp, ScoreSummaries, type ScoreSummary } from "@/components/dash/score";
+import { ENERGY_ADVICE, SCORE_HELP, SLEEP_ADVICE, band, strainBand, strainTarget } from "@/lib/scores";
 import {
   GOALS, baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, dayStartMs, latestDataDay, maxHeartRate, recentSeries, shiftDay,
   trainingLoad, vo2History, workoutsBetween,
@@ -36,9 +36,33 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   const hasAny = d.steps != null || n != null || d.hr.length > 0 || d.workouts.length > 0;
   const latest = hasAny ? null : latestDataDay();
 
-  const scores = dailyScores({ from: day, to: day }).get(day)!;
-  const energy = scores.energy;
-  const energyBand = energy.score != null ? band(energy.score) : null;
+  const scores = dailyScores({ from: day, to: day }, { withStrain: true }).get(day)!;
+  const { energy, sleep, strain } = scores;
+  const target = strainTarget(energy.score);
+  const summaries: ScoreSummary[] = [
+    {
+      key: "energy", title: "Energy", score: energy.score, parts: energy.parts, help: SCORE_HELP.energy,
+      band: energy.score != null ? band(energy.score) : null,
+      note: energy.score != null ? ENERGY_ADVICE[band(energy.score).label] : "Needs last night's sleep or a resting heart rate",
+      remark: energy.capped ? "Capped because your resting heart rate is well above your usual." : undefined,
+    },
+    {
+      key: "sleep", title: "Sleep", score: sleep?.score ?? null, parts: sleep?.parts ?? [], help: SCORE_HELP.sleep,
+      band: sleep?.score != null ? band(sleep.score) : null,
+      note: sleep?.score != null ? SLEEP_ADVICE[band(sleep.score).label] : "No sleep recorded last night",
+      link: { href: "/sleep", label: "Sleep" },
+    },
+    {
+      key: "strain", title: "Strain", score: strain?.score ?? null, parts: strain?.parts ?? [], help: SCORE_HELP.strain,
+      band: strain?.score != null ? strainBand(strain.score) : null,
+      note: strain?.score == null ? "No heart-rate readings" : !target ? "No energy score to set a target"
+        : strain.score > target[1] ? `Above the ${target[0]}-${target[1]} target`
+        : strain.score >= target[0] ? `On target (${target[0]}-${target[1]})`
+        : isToday ? `Target today: ${target[0]}-${target[1]}` : `Below the ${target[0]}-${target[1]} target`,
+      scale: "Strain runs 0 to 100 and higher is not better: under 30 is light, 30 to 54 moderate, 55 to 79 high, 80+ all out. The bars show the strain each part would add up to on its own.",
+      link: { href: "/workouts", label: "Workouts" },
+    },
+  ];
   const vo2 = vo2History(day);
   const vo2Latest = vo2.at(-1) ?? null;
 
@@ -75,17 +99,8 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
 
         {/* Goals and body check */}
         <div className="grid gap-4 xl:grid-cols-[1fr_1.15fr]">
-          <Panel title="Energy" icon={Zap} domain="energy" description="How recovered you are this morning"
-            action={<ScoreHelp title="Energy score" text={SCORE_HELP.energy} />}>
-            {energy.score != null ? (
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                <div className="flex flex-col items-center gap-2 sm:w-40">
-                  <ScoreDial score={energy.score} color="var(--energy)" size={120} />
-                  <p className="text-center text-xs text-muted-foreground">{ENERGY_ADVICE[energyBand!.label]}</p>
-                </div>
-                <div className="min-w-0 flex-1"><ScoreParts parts={energy.parts} color="var(--energy)" compact /></div>
-              </div>
-            ) : <EmptyHint icon={Zap} title="Not enough data yet">The energy score needs last night&apos;s sleep or a resting heart rate.</EmptyHint>}
+          <Panel title="Daily scores" icon={Gauge} description="Tap a score to see what went into it">
+            <ScoreSummaries items={summaries} />
           </Panel>
           <Panel title="Goals" icon={Target} domain="activity" description={scores.activity.score != null ? `Activity score ${scores.activity.score}, ${band(scores.activity.score).label.toLowerCase()}` : undefined}
             action={<ScoreHelp title="Activity score" text={SCORE_HELP.activity} />} bodyClassName="flex items-center">
