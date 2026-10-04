@@ -510,22 +510,22 @@ export function ZoneBars({ seconds, zones }: {
 }
 
 /** Plain line chart for a single daily series (vitals with sparse readings). */
-export function DailyLine({ data, label, color, digits = 0, hrefPrefix, height = 200 }: {
-  data: Point[]; label: string; color: string; digits?: number; hrefPrefix?: string; height?: number;
+export function DailyLine({ data, label, color, digits = 0, hrefPrefix, height = 200, period = "day" }: {
+  data: Point[]; label: string; color: string; digits?: number; hrefPrefix?: string; height?: number; period?: Period;
 }) {
   const onClick = useDayClick(hrefPrefix);
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={MARGIN} onClick={onClick} style={{ cursor: hrefPrefix ? "pointer" : undefined }}>
         {GRID}
-        <XAxis dataKey="day" {...AXIS} tickFormatter={fmtDay} minTickGap={24} />
+        <XAxis dataKey="day" {...AXIS} tickFormatter={period === "day" ? fmtDay : fmtX(period)} minTickGap={24} />
         <YAxis {...AXIS} axisLine={false} width={40} domain={["auto", "auto"]} tickFormatter={(v) => fmtNum(v, digits)} />
         <Tooltip
           cursor={{ stroke: "var(--chart-axis)", strokeWidth: 1 }}
           content={({ active, payload }: TooltipContentProps) => {
             if (!active || !payload?.length || payload[0].value == null) return null;
             const p = payload[0].payload as Point;
-            return <TooltipBox title={fmtDay(p.day)} rows={[{ label, value: fmtNum(Number(p.value), digits), color }]} />;
+            return <TooltipBox title={period === "day" ? fmtDay(p.day) : fmtPeriod(p.day, period)} rows={[{ label, value: fmtNum(Number(p.value), digits), color }]} />;
           }}
         />
         <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} connectNulls

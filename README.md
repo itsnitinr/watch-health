@@ -58,6 +58,7 @@ sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
 | **Sleep** `/sleep` | Time asleep, bed/wake-time consistency, sleep debt, stages by night and stage balance, weeknights vs weekends, every night |
 | **Heart & body** `/heart` | Daily heart-rate range, resting HR, VO₂ max, blood oxygen, respiratory rate, skin temperature, weight, body fat |
 | **Workouts** `/workouts` | Weekly training load, time in heart-rate zones, by activity, personal bests; each workout has its own page |
+| **Trends** `/trends` | Last 30 days against the 30 before and a year earlier, a month-by-month table shaded by your better months, monthly steps, sleep, resting HR and workout time |
 | **Ask** `/chat` | The assistant (below) |
 
 Light, dark or system theme from the sidebar. Optional settings in `.env.local`: `STEPS_GOAL`,

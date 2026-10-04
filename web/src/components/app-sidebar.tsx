@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BedDouble, Dumbbell, HeartPulse, RefreshCw, Sparkles, Sun, Watch } from "lucide-react";
+import { Activity, BedDouble, Dumbbell, HeartPulse, RefreshCw, Sparkles, Sun, TrendingUp, Watch } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/sleep", label: "Sleep", icon: BedDouble, color: "text-sleep", match: (p: string) => p.startsWith("/sleep") },
   { href: "/heart", label: "Heart & body", icon: HeartPulse, color: "text-heart", match: (p: string) => p.startsWith("/heart") },
   { href: "/workouts", label: "Workouts", icon: Dumbbell, color: "text-exercise", match: (p: string) => p.startsWith("/workouts") },
+  { href: "/trends", label: "Trends", icon: TrendingUp, color: "text-foreground", match: (p: string) => p.startsWith("/trends") },
   { href: "/chat", label: "Ask", icon: Sparkles, color: "text-foreground", match: (p: string) => p.startsWith("/chat") },
 ];
 
