@@ -56,7 +56,7 @@ sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
 | **Today** `/` | Goal rings (steps, sleep, exercise), a body check against your 30-day usual, key numbers with 7-day sparklines, heart rate through the day, last night's sleep. Step through days or pick one from the calendar (`/day/YYYY-MM-DD`). |
 | **Activity** `/activity` | Steps calendar, daily steps with 7-day average, best days, steps by weekday, distance, calories, weekly/monthly averages |
 | **Sleep** `/sleep` | Time asleep, bed/wake-time consistency, sleep debt, stages by night and stage balance, weeknights vs weekends, every night |
-| **Heart & body** `/heart` | Daily heart-rate range, resting HR, HRV, blood oxygen, respiratory rate, skin temperature, weight, body fat |
+| **Heart & body** `/heart` | Daily heart-rate range, resting HR, VO₂ max, blood oxygen, respiratory rate, skin temperature, weight, body fat |
 | **Workouts** `/workouts` | Weekly training load, time in heart-rate zones, by activity, personal bests; each workout has its own page |
 | **Ask** `/chat` | The assistant (below) |
 
