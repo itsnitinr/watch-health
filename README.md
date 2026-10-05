@@ -68,6 +68,33 @@ and the assistant live. If you like, use the `.ts.net` address in **Watch Sync**
 on Wi-Fi away from home. The HTTPS certificate puts the machine and tailnet names in public
 certificate-transparency logs; nothing else about the dashboard is exposed.
 
+### Keep it running (systemd)
+
+To have the dashboard start at boot, run it as a user service. Save this as
+`~/.config/systemd/user/watch-health.service`, changing the node path to your own (`which node`):
+
+```ini
+[Unit]
+Description=Watch Health dashboard (gw-dashboard, port 4747)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/Projects/gw-dashboard/web
+Environment=PATH=%h/.nvm/versions/node/v26.7.0/bin:%h/.local/bin:/usr/local/bin:/usr/bin
+Environment=NODE_ENV=production
+ExecStart=%h/.nvm/versions/node/v26.7.0/bin/npm start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Then run `npm run build` in `web/`, `systemctl --user enable --now watch-health`, and
+`loginctl enable-linger` (so it starts at boot without logging in). After changing the code, run
+`npm run build && systemctl --user restart watch-health`. Logs: `journalctl --user -u watch-health -f`.
+
 ## Pages
 
 | Page | What's on it |
