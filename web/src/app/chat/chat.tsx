@@ -43,7 +43,7 @@ type Message = {
 const SUGGESTIONS = [
   { icon: BedDouble, color: "text-sleep", text: "How has my sleep been this month compared to last month?" },
   { icon: Dumbbell, color: "text-exercise", text: "Do I sleep better on days I work out?" },
-  { icon: HeartPulse, color: "text-heart", text: "What's the trend in my resting heart rate and HRV?" },
+  { icon: HeartPulse, color: "text-heart", text: "What's the trend in my resting heart rate and VO₂ max?" },
   { icon: TrendingUp, color: "text-activity", text: "Give me a weekly summary with three things to focus on." },
 ];
 

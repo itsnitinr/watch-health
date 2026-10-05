@@ -54,10 +54,10 @@ for (let i = DAYS - 1; i >= 0; i--) {
     score: Math.round(Math.min(98, gauss(lateNight ? 70 : 82, 6))), source: SRC, stages,
   });
 
-  // Resting HR drifts down over the period (training effect), worse after short sleep
+  // Resting HR drifts down over the period (training effect), worse after short sleep. Like real
+  // Samsung data there's no resting-HR or HRV record: the dashboard derives resting HR from the
+  // overnight heart rate below.
   const rhr = gauss(62 - (DAYS - i) * 0.03 + (lateNight ? 3 : 0), 1.5);
-  samples.push({ uid: `demo:rhr:${day}`, type: "resting_heart_rate", start_ms: wake.getTime(), value: Math.round(rhr), unit: "bpm", source: SRC });
-  samples.push({ uid: `demo:hrv:${day}`, type: "hrv_rmssd", start_ms: wake.getTime(), value: Math.round(gauss(lateNight ? 38 : 48, 6)), unit: "ms", source: SRC });
   samples.push({ uid: `demo:spo2:${day}`, type: "spo2", start_ms: wake.getTime() - 3600000, value: Math.round(gauss(96, 1) * 10) / 10, unit: "%", source: SRC });
 
   // Workout timing first, so the all-day heart rate can leave a gap for it
@@ -66,11 +66,13 @@ for (let i = DAYS - 1; i >= 0; i--) {
   const workoutMin = Math.round(run ? gauss(48, 12) : gauss(55, 8));
   const workoutEnd = workoutStart + workoutMin * 60000;
 
-  // All-day heart rate every 10 minutes: lower while asleep
-  for (let m = 0; m < 24 * 60; m += 10) {
+  // All-day heart rate every 10 minutes, and every minute while asleep as the watch records it
+  // (resting HR needs 10+ readings in a 30-minute window); lower while asleep
+  for (let m = 0; m < 24 * 60;) {
     const ts = d.getTime() + m * 60000;
-    if (workout && ts >= workoutStart && ts < workoutEnd) continue;
     const asleep = ts < wake.getTime() || ts > wake.getTime() + 16 * 3600000;
+    m += asleep ? 1 : 10;
+    if (workout && ts >= workoutStart && ts < workoutEnd) continue;
     samples.push({
       uid: `demo:hr:${ts}`, type: "heart_rate", start_ms: ts,
       value: Math.round(asleep ? gauss(rhr - 2, 2) : gauss(rhr + 14 + (m > 12 * 60 && m < 14 * 60 ? 6 : 0), 6)), unit: "bpm", source: SRC,
@@ -96,6 +98,8 @@ for (let i = DAYS - 1; i >= 0; i--) {
       distance_m: run ? Math.round((workoutMin / gauss(6.3, 0.35)) * 1000) : null,
       avg_hr: Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length), max_hr: Math.max(...hrs), source: SRC,
     });
+    // The watch estimates VO2 max after outdoor runs; it creeps up with training
+    if (run) samples.push({ uid: `demo:vo2:${day}`, type: "vo2_max", start_ms: workoutEnd, value: Math.round(gauss(44 + (DAYS - i) * 0.015, 0.5) * 10) / 10, unit: "ml/kg/min", source: SRC });
   }
 
   if (i % 3 === 0) {
