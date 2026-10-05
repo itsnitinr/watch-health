@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The dashboard runs on your own computer over the home network (plain http://192.168.x.x:3000),
+<!-- The dashboard runs on your own computer over the home network (plain http://192.168.x.x:4747),
      so cleartext must be allowed. Requests carry a bearer token; use this only on a trusted network. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />

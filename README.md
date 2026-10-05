@@ -20,7 +20,7 @@ Requires Node 22.5+ (it uses the built-in `node:sqlite`).
 cd web
 npm install
 cp .env.example .env.local   # then fill in INGEST_TOKEN (openssl rand -hex 24)
-npm run dev                  # http://localhost:3000, also reachable from your phone on the LAN
+npm run dev                  # http://localhost:4747, also reachable from your phone on the LAN
 ```
 
 To try it before importing anything: `npm run seed:demo && npm run dev:demo`. This uses a separate
@@ -41,7 +41,7 @@ add a handler in `web/scripts/import-shealth.ts`.
 1. In Samsung Health: Settings → **Health Connect** → enable syncing.
 2. Build and install: `cd android && ./gradlew installDebug` (phone connected over USB with debugging on),
    or copy `android/app/build/outputs/apk/debug/app-debug.apk` to the phone.
-3. In **Watch Sync**: enter `http://<this computer's LAN IP>:3000` and the `INGEST_TOKEN`, then tap
+3. In **Watch Sync**: enter `http://<this computer's LAN IP>:4747` and the `INGEST_TOKEN`, then tap
    **Grant access** and **Sync now**. Turn on hourly auto-sync if you want.
 
 The app never reads more than 30 days back: the first sync (and **Re-sync last 30 days**) starts
@@ -58,7 +58,7 @@ away from home. Traffic goes directly between your own devices; nothing is hoste
 1. On this computer: `curl -fsSL https://tailscale.com/install.sh | sh`, then `sudo tailscale up` and log in.
 2. In the Tailscale admin console → **DNS**: make sure MagicDNS is on and enable **HTTPS Certificates**.
 3. Run the dashboard (`npm run build && npm start` in `web/`, or `npm run dev`), then
-   `sudo tailscale serve --bg 3000`. It prints the address: `https://<machine>.<tailnet>.ts.net`.
+   `sudo tailscale serve --bg 4747`. It prints the address: `https://<machine>.<tailnet>.ts.net`.
    It only works inside your tailnet. Don't use `tailscale funnel`, which would put it on the internet.
 4. On the phone: install the Tailscale app and log in with the same account.
 5. Open the `https://….ts.net` address in Chrome → ⋮ → **Add to Home screen** → **Install**.

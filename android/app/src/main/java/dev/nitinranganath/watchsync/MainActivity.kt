@@ -131,7 +131,7 @@ private fun SyncScreen() {
         Text("1. Dashboard connection", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
             value = url, onValueChange = { url = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-            label = { Text("Server URL") }, placeholder = { Text("http://192.168.1.19:3000") },
+            label = { Text("Server URL") }, placeholder = { Text("http://192.168.1.19:4747") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
         OutlinedTextField(
