@@ -49,6 +49,25 @@ there, and later syncs read from the last sync, with a 2-day overlap to catch da
 delivered late. Older history comes from the Samsung Health export above. Background
 sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
 
+## 4. Use it as an app on your phone (Tailscale)
+
+The dashboard installs from Chrome as a standalone app with its own icon and no address bar. Chrome only
+installs it from an HTTPS address. Tailscale gives you one, and it also lets the phone reach the dashboard
+away from home. Traffic goes directly between your own devices; nothing is hosted in the cloud.
+
+1. On this computer: `curl -fsSL https://tailscale.com/install.sh | sh`, then `sudo tailscale up` and log in.
+2. In the Tailscale admin console → **DNS**: make sure MagicDNS is on and enable **HTTPS Certificates**.
+3. Run the dashboard (`npm run build && npm start` in `web/`, or `npm run dev`), then
+   `sudo tailscale serve --bg 3000`. It prints the address: `https://<machine>.<tailnet>.ts.net`.
+   It only works inside your tailnet. Don't use `tailscale funnel`, which would put it on the internet.
+4. On the phone: install the Tailscale app and log in with the same account.
+5. Open the `https://….ts.net` address in Chrome → ⋮ → **Add to Home screen** → **Install**.
+
+Pull down on a page to refresh it. The app still needs this computer to be on, since that's where the data
+and the assistant live. If you like, use the `.ts.net` address in **Watch Sync** too, so it can also sync
+on Wi-Fi away from home. The HTTPS certificate puts the machine and tailnet names in public
+certificate-transparency logs; nothing else about the dashboard is exposed.
+
 ## Pages
 
 | Page | What's on it |

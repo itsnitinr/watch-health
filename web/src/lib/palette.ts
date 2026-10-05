@@ -9,3 +9,6 @@ export const STAGES = [
 ] as const;
 
 export const ZONE_COLORS = ["var(--z1)", "var(--z2)", "var(--z3)", "var(--z4)", "var(--z5)"];
+
+/** Page background per theme (--background in globals.css); the installed app tints the status bar with it. */
+export const THEME_COLORS = { light: "#f4f4f5", dark: "#0f0f11" } as const;

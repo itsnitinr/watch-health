@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -7,6 +7,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { nowMs } from "@/lib/analytics";
 import { fmtAgo } from "@/lib/format";
+import { THEME_COLORS } from "@/lib/palette";
 import { dataCoverage } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -17,6 +18,14 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
 export const metadata: Metadata = {
   title: { default: "Today · Watch Health", template: "%s · Watch Health" },
   description: "Personal Galaxy Watch health dashboard",
+  appleWebApp: { title: "Watch Health", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
+  ],
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
