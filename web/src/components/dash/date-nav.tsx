@@ -1,12 +1,13 @@
 "use client";
 
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { HapticLink } from "@/components/haptic-link";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { haptic } from "@/lib/haptics";
 
 const toDate = (day: string) => new Date(`${day}T12:00:00`);
 const toDay = (d: Date) => d.toLocaleDateString("sv");
@@ -28,7 +29,7 @@ export function DateNav({ day, today, dataDays }: { day: string; today: string; 
   return (
     <div className="flex items-center gap-1">
       <Button variant="outline" size="icon-sm" asChild aria-label="Previous day">
-        <Link href={hrefFor(shift(day, -1), today)}><ChevronLeft /></Link>
+        <HapticLink href={hrefFor(shift(day, -1), today)}><ChevronLeft /></HapticLink>
       </Button>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -47,6 +48,7 @@ export function DateNav({ day, today, dataDays }: { day: string; today: string; 
             modifiersClassNames={{ hasData: "[&>button]:font-semibold [&>button]:underline [&>button]:decoration-activity [&>button]:decoration-2 [&>button]:underline-offset-4" }}
             onSelect={(d) => {
               if (!d) return;
+              haptic();
               setOpen(false);
               router.push(hrefFor(toDay(d), today));
             }}
@@ -54,13 +56,13 @@ export function DateNav({ day, today, dataDays }: { day: string; today: string; 
           <div className="flex items-center justify-between border-t px-3 py-2 text-xs text-muted-foreground">
             <span className="underline decoration-activity decoration-2 underline-offset-4">Underlined</span>
             <span>days have data</span>
-            <Button variant="ghost" size="xs" onClick={() => { setOpen(false); router.push("/"); }}>Today</Button>
+            <Button variant="ghost" size="xs" onClick={() => { haptic(); setOpen(false); router.push("/"); }}>Today</Button>
           </div>
         </PopoverContent>
       </Popover>
       <Button variant="outline" size="icon-sm" asChild aria-label="Next day" disabled={day >= today}>
         {day >= today ? <span aria-disabled className="pointer-events-none opacity-40"><ChevronRight /></span>
-          : <Link href={hrefFor(shift(day, 1), today)}><ChevronRight /></Link>}
+          : <HapticLink href={hrefFor(shift(day, 1), today)}><ChevronRight /></HapticLink>}
       </Button>
     </div>
   );

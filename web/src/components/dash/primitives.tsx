@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { HapticLink } from "@/components/haptic-link";
 import { cn } from "@/lib/utils";
 
 export type Domain = "activity" | "sleep" | "exercise" | "heart" | "body" | "energy" | "strain" | "neutral";
@@ -120,11 +121,11 @@ export function SegmentedLinks({ options, current, href }: {
   return (
     <nav className="inline-flex rounded-lg bg-muted p-0.5 text-xs font-medium">
       {options.map((o) => (
-        <Link key={o.value} href={href(o.value)} aria-current={o.value === current ? "page" : undefined}
+        <HapticLink key={o.value} href={href(o.value)} aria-current={o.value === current ? "page" : undefined}
           className={cn("rounded-md px-2.5 py-1.5 transition-colors",
             o.value === current ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
           {o.label}
-        </Link>
+        </HapticLink>
       ))}
     </nav>
   );

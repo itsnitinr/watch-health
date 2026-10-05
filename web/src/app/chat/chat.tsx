@@ -20,6 +20,7 @@ import {
   DEFAULT_EFFORT, DEFAULT_MODEL, EFFORTS, MODELS, isEffort, isModelId, supportsEffort, type Effort, type ModelId,
 } from "@/lib/models";
 import type { Thread, ThreadSummary } from "@/lib/chats";
+import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 
 type Tool = { name: string; input: unknown };
@@ -259,6 +260,7 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
 
   async function send(text: string) {
     if (!text.trim() || busy || loading) return;
+    haptic();
     // The first question starts a thread; replacing the URL also drops a ?q= so a reload doesn't ask it again.
     let id = threadRef.current;
     if (!id) {
@@ -331,6 +333,7 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
       if (!abort.signal.aborted) update((m) => ({ ...m, error: e instanceof Error ? e.message : String(e) }));
     } finally {
       update((m) => ({ ...m, phase: undefined, thought: undefined, ms: m.startedAt && Date.now() - m.startedAt }));
+      if (!abort.signal.aborted && !reply.error) haptic("done");
       setBusy(false);
       abortRef.current = null;
       void saveThread(id, [...history, reply]);

@@ -4,9 +4,11 @@ import { ChevronRight, Ellipsis, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { HapticsToggle } from "@/components/haptics-toggle";
 import { NAV } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 
 const TABS = NAV.filter((n) => n.tab);
@@ -27,7 +29,7 @@ export function BottomNav({ lastSync }: { lastSync: string | null }) {
             const active = item.match(pathname);
             return (
               <li key={item.href} className="flex-1">
-                <Link href={item.href} aria-current={active ? "page" : undefined} className={tabClass}>
+                <Link href={item.href} onClick={() => haptic()} aria-current={active ? "page" : undefined} className={tabClass}>
                   <TabIcon active={active}><item.icon className={cn("size-5", active && item.color)} /></TabIcon>
                   <span className={cn(active && "font-medium text-foreground")}>{item.short ?? item.label}</span>
                 </Link>
@@ -35,7 +37,7 @@ export function BottomNav({ lastSync }: { lastSync: string | null }) {
             );
           })}
           <li className="flex-1">
-            <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}
+            <button type="button" onClick={() => { haptic(); setMoreOpen(true); }} aria-haspopup="dialog" aria-expanded={moreOpen}
               aria-current={inMore ? "page" : undefined} className={tabClass}>
               <TabIcon active={inMore || moreOpen}><Ellipsis className="size-5" /></TabIcon>
               <span className={cn((inMore || moreOpen) && "font-medium text-foreground")}>More</span>
@@ -55,7 +57,7 @@ export function BottomNav({ lastSync }: { lastSync: string | null }) {
               const active = item.match(pathname);
               return (
                 <li key={item.href}>
-                  <Link href={item.href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined}
+                  <Link href={item.href} onClick={() => { haptic(); setMoreOpen(false); }} aria-current={active ? "page" : undefined}
                     className={cn("flex min-h-12 items-center gap-3 px-4 text-sm transition-colors active:bg-muted [-webkit-tap-highlight-color:transparent]",
                       active && "bg-muted/60 font-medium")}>
                     <item.icon className={cn("size-4 text-muted-foreground", active && item.color)} />
@@ -68,6 +70,7 @@ export function BottomNav({ lastSync }: { lastSync: string | null }) {
           </ul>
           <div className="mx-4 mt-4 space-y-3">
             <ThemeToggle />
+            <HapticsToggle />
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <RefreshCw className="size-3.5 shrink-0" />
               {lastSync ? `Phone synced ${lastSync}` : "Phone not synced yet"}

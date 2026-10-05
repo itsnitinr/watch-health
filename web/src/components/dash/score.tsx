@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { haptic } from "@/lib/haptics";
 import { band, type Band, type ScorePart } from "@/lib/scores";
 import { cn } from "@/lib/utils";
 
@@ -117,7 +118,7 @@ export function ScoreSummaries({ items }: { items: ScoreSummary[] }) {
           const st = SUMMARY_STYLE[x.key];
           const active = open === x.key;
           return (
-            <button key={x.key} type="button" onClick={() => setOpen(active ? null : x.key)} aria-expanded={active}
+            <button key={x.key} type="button" onClick={() => { haptic(); setOpen(active ? null : x.key); }} aria-expanded={active}
               aria-controls="score-breakdown"
               className={cn("group flex min-w-0 flex-col items-center gap-2 rounded-xl px-1 pb-2 pt-1.5 text-center transition-colors",
                 "hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring", active && "bg-muted/60")}>
