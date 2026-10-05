@@ -1,81 +1,120 @@
-# Galaxy Watch health dashboard
+# Watch Health
 
-A private dashboard for Galaxy Watch 7 data, plus an AI assistant that answers questions about it.
-Everything runs on your own computer; health data never leaves it, except the rows the assistant
-reads while answering a question, which are sent to Anthropic (via Claude Code or the API).
+A self-hosted dashboard for your Samsung Galaxy Watch data: a cleaner alternative to the Samsung Health app.
+It also has an AI assistant you can ask questions about your sleep, activity and heart data.
+
+It runs on your own computer. Your health data stays there; nothing is uploaded to a cloud service.
+
+![Today page in dark mode: daily scores, goal rings and key numbers](docs/screenshots/today.png)
+
+<p align="center">
+  <img src="docs/screenshots/phones.png" alt="The dashboard on a phone: Today, Activity and Sleep pages with a bottom tab bar" width="720">
+</p>
+
+## What you get
+
+- **Today:** daily scores for energy, sleep and strain, goal rings, and how today compares with your usual
+- **Activity, Sleep, Heart & body, Workouts:** charts for 30 days up to a year, with personal bests
+- **Trends:** the last 30 days against the 30 before, and a month-by-month table
+- **Ask:** an assistant (Claude) that looks up your data to answer questions like "Do I sleep better on days I work out?"
+- **A phone app:** install it from Chrome on Android, with bottom tabs, haptics and light/dark mode
+
+| Sleep | Heart & body |
+|---|---|
+| ![Sleep page](docs/screenshots/sleep.png) | ![Heart & body page](docs/screenshots/heart.png) |
+| **Workouts** | **Trends** |
+| ![Workouts page](docs/screenshots/workouts.png) | ![Trends page](docs/screenshots/trends.png) |
+
+## How it works
 
 ```
-Galaxy Watch → Samsung Health → Health Connect → android/ (Watch Sync app)
-                                                     │  POST /api/ingest (home Wi-Fi, bearer token)
-                                                     ▼
-                     web/ (Next.js) ── SQLite (data/health.db) ── dashboard  /
-                                                              └── assistant  /chat
+Galaxy Watch → Samsung Health → Health Connect → Watch Sync (Android app in android/)
+                                                      │  sends new data over your Wi-Fi
+                                                      ▼
+                                    Dashboard (Next.js in web/) on your computer
+                                    stores everything in SQLite (data/health.db)
 ```
 
-## 1. Run the dashboard
+Samsung Health shares your watch data with Android's Health Connect. A small companion app, **Watch Sync**,
+reads it and sends it to the dashboard on your computer. Your older history comes from a one-time
+Samsung Health export.
 
-Requires Node 22.5+ (it uses the built-in `node:sqlite`).
+## Try it with demo data
+
+You need [Node.js](https://nodejs.org) 22.5 or newer.
 
 ```sh
 cd web
 npm install
-cp .env.example .env.local   # then fill in INGEST_TOKEN (openssl rand -hex 24)
-npm run dev                  # http://localhost:4747, also reachable from your phone on the LAN
+npm run seed:demo   # creates data/demo.db with 120 days of made-up data
+npm run dev:demo    # open http://localhost:4747
 ```
 
-To try it before importing anything: `npm run seed:demo && npm run dev:demo`. This uses a separate
-`data/demo.db` with 120 days of generated data.
+## Set it up with your own data
 
-## 2. Import your history (Samsung Health export)
+### 1. Start the dashboard
 
-1. On the phone: Samsung Health → ⋮ → Settings → **Download personal data** → Download.
-2. Copy the `Download/Samsung Health/samsunghealth_*` folder to this computer.
-3. `npm run import:shealth -- /path/to/samsunghealth_xxx`
+```sh
+cd web
+npm install
+cp .env.example .env.local
+```
 
-The importer lists which files it used and which it skipped. Re-running it is safe because rows are
-upserted. Samsung's CSV columns aren't formally documented, so if a metric you expected is missing,
-add a handler in `web/scripts/import-shealth.ts`.
+Open `.env.local` and set `INGEST_TOKEN` to a random secret (`openssl rand -hex 24` makes one). Watch Sync
+uses it to prove it's allowed to send data. Then run:
 
-## 3. Keep it in sync (Android app)
+```sh
+npm run build && npm start   # http://localhost:4747
+```
 
-1. In Samsung Health: Settings → **Health Connect** → enable syncing.
-2. Build and install: `cd android && ./gradlew installDebug` (phone connected over USB with debugging on),
-   or copy `android/app/build/outputs/apk/debug/app-debug.apk` to the phone.
-3. In **Watch Sync**: enter `http://<this computer's LAN IP>:4747` and the `INGEST_TOKEN`, then tap
-   **Grant access** and **Sync now**. Turn on hourly auto-sync if you want.
+Use `npm run dev` instead while you're changing the code.
 
-The app never reads more than 30 days back: the first sync (and **Re-sync last 30 days**) starts
-there, and later syncs read from the last sync, with a 2-day overlap to catch data the watch
-delivered late. Older history comes from the Samsung Health export above. Background
-sync runs only on unmetered Wi-Fi, and quietly retries when the computer is off.
+### 2. Import your history
 
-## 4. Use it as an app on your phone (Tailscale)
+1. On your phone, open Samsung Health → ⋮ → Settings → **Download personal data** → Download.
+2. Copy the `Download/Samsung Health/samsunghealth_*` folder to your computer.
+3. In `web/`, run `npm run import:shealth -- /path/to/samsunghealth_xxx`.
 
-The dashboard installs from Chrome as a standalone app with its own icon and no address bar. Chrome only
-installs it from an HTTPS address. Tailscale gives you one, and it also lets the phone reach the dashboard
-away from home. Traffic goes directly between your own devices; nothing is hosted in the cloud.
+It lists which files it used and which it skipped. It's safe to run again.
 
-1. On this computer: `curl -fsSL https://tailscale.com/install.sh | sh`, then `sudo tailscale up` and log in.
-2. In the Tailscale admin console → **DNS**: make sure MagicDNS is on and enable **HTTPS Certificates**.
-3. Run the dashboard (`npm run build && npm start` in `web/`, or `npm run dev`), then
-   `sudo tailscale serve --bg 4747`. It prints the address: `https://<machine>.<tailnet>.ts.net`.
-   It only works inside your tailnet. Don't use `tailscale funnel`, which would put it on the internet.
-4. On the phone: install the Tailscale app and log in with the same account.
-5. Open the `https://….ts.net` address in Chrome → ⋮ → **Add to Home screen** → **Install**.
+### 3. Install Watch Sync on your phone
 
-Pull down on a page to refresh it. The app still needs this computer to be on, since that's where the data
-and the assistant live. If you like, use the `.ts.net` address in **Watch Sync** too, so it can also sync
-on Wi-Fi away from home. The HTTPS certificate puts the machine and tailnet names in public
-certificate-transparency logs; nothing else about the dashboard is exposed.
+You need Android 9 or newer, and JDK 17+ on your computer to build the app.
 
-### Keep it running (systemd)
+1. In Samsung Health, go to Settings → **Health Connect** and turn on syncing.
+2. Connect your phone over USB with USB debugging on, then run `cd android && ./gradlew installDebug`.
+   Or build it and copy `android/app/build/outputs/apk/debug/app-debug.apk` to the phone.
+3. Open **Watch Sync**, enter `http://<your computer's local IP>:4747` and your `INGEST_TOKEN`, then tap
+   **Grant access** and **Sync now**. Turn on hourly sync if you like.
 
-To have the dashboard start at boot, run it as a user service. Save this as
-`~/.config/systemd/user/watch-health.service`, changing the node path to your own (`which node`):
+Watch Sync reads up to 30 days back. Background sync only runs on Wi-Fi, and quietly retries if your
+computer is off.
+
+### 4. Optional: use it as an app on your phone
+
+Chrome can install the dashboard as an app, but only from an HTTPS address. [Tailscale](https://tailscale.com)
+gives you one, and it also lets your phone reach the dashboard when you're away from home. The
+connection goes directly between your own devices.
+
+1. Install Tailscale on your computer and log in: `curl -fsSL https://tailscale.com/install.sh | sh`, then
+   `sudo tailscale up`.
+2. In the Tailscale admin console, go to **DNS** and turn on **HTTPS Certificates**.
+3. Run `sudo tailscale serve --bg 4747`. It prints your address, like `https://my-pc.tail1234.ts.net`.
+   Only your own devices can open it. Don't use `tailscale funnel`, which would put it on the internet.
+4. Install the Tailscale app on your phone and log in with the same account.
+5. Open your address in Chrome, then tap ⋮ → **Add to Home screen** → **Install**.
+
+You can also enter this address in Watch Sync, so it syncs on any Wi-Fi network. Pull down on a page to
+refresh it. The HTTPS certificate makes your machine and tailnet names visible in public certificate logs.
+
+### 5. Optional: start it automatically
+
+On Linux, run the dashboard as a systemd user service so it starts at boot. Save this as
+`~/.config/systemd/user/watch-health.service`. Change the project path, and the Node path from `which node`:
 
 ```ini
 [Unit]
-Description=Watch Health dashboard (gw-dashboard, port 4747)
+Description=Watch Health dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -91,66 +130,64 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-Then run `npm run build` in `web/`, `systemctl --user enable --now watch-health`, and
-`loginctl enable-linger` (so it starts at boot without logging in). After changing the code, run
-`npm run build && systemctl --user restart watch-health`. Logs: `journalctl --user -u watch-health -f`.
+Then run:
 
-## Pages
+```sh
+systemctl --user enable --now watch-health
+loginctl enable-linger   # start at boot, before you log in
+```
 
-| Page | What's on it |
-|---|---|
-| **Today** `/` | Goal rings (steps, sleep, exercise), a body check against your 30-day usual, key numbers with 7-day sparklines, heart rate through the day, last night's sleep. Step through days or pick one from the calendar (`/day/YYYY-MM-DD`). |
-| **Activity** `/activity` | Steps calendar, daily steps with 7-day average, best days, steps by weekday, distance, calories, weekly/monthly averages |
-| **Sleep** `/sleep` | Time asleep, bed/wake-time consistency, sleep debt, stages by night and stage balance, weeknights vs weekends, every night |
-| **Heart & body** `/heart` | Daily heart-rate range, resting HR, VO₂ max, blood oxygen, respiratory rate, skin temperature, weight, body fat |
-| **Workouts** `/workouts` | Weekly training load, time in heart-rate zones, by activity, personal bests; each workout has its own page |
-| **Trends** `/trends` | Last 30 days against the 30 before and a year earlier, a month-by-month table shaded by your better months, monthly steps, sleep, resting HR and workout time |
-| **Ask** `/chat` | The assistant (below) |
-
-Light, dark or system theme from the sidebar. Optional settings in `.env.local`: `STEPS_GOAL`,
-`SLEEP_GOAL_HOURS`, `EXERCISE_GOAL_MIN` (ring goals), `MAX_HR` (heart-rate zones; default is the
-highest HR recorded in a workout) and `HEIGHT_CM` (stride length for distance).
-
-Samsung Health only shares workout distance with Health Connect, so daily distance is the larger
-of that and steps × stride (0.415 × height, or 0.76 m). Workouts the watch detected on its own
-(short walks and "other" activities) are hidden on the Workouts page by default; they still count
-as exercise. The Android app sends each workout's recording method; tap **Re-sync last 30 days**
-once after updating the app so recent workouts get it too.
+After changing the code, run `npm run build && systemctl --user restart watch-health`. To see the logs,
+run `journalctl --user -u watch-health -f`.
 
 ## The assistant
 
-`/chat` uses Claude (`claude-opus-5-5`) with three read-only tools: data coverage, a per-day summary,
-and SQL over a **read-only** connection to the database. Each lookup it makes is shown under its answer.
+The **Ask** page uses Claude to answer questions about your data. It can only read your data, through
+a read-only connection. Each lookup it makes is shown under its answer.
 
-By default it runs through the Claude Code installed on this machine (`claude` must be logged in), so
-your Claude subscription covers it and no API key is needed. Claude Code's own tools, settings,
-plugins and MCP servers are switched off for these requests. Set `ANTHROPIC_API_KEY` in
-`web/.env.local` to call the Anthropic API directly instead, or `AGENT_BACKEND=api|claude-code` to force one.
+By default it uses the [Claude Code](https://claude.com/claude-code) installed on your computer, so your
+Claude subscription covers it. Run `claude` once to log in. To use an Anthropic API key instead, set
+`ANTHROPIC_API_KEY` in `web/.env.local`.
 
-## Data model
+The rows it reads while answering are sent to Anthropic. The rest of the dashboard never sends data
+anywhere.
 
-| Table | Holds |
-|---|---|
-| `samples` | heart rate, resting HR, HRV, SpO₂, weight, body composition, BP, VO₂ max, steps and distance in short intervals, speed / cadence / power / elevation during workouts, hydration, nutrition, … (one row per measurement) |
-| `daily_metrics` | steps, distance, calories, floors as per-day totals (de-duplicated across phone + watch) |
-| `sleep_sessions` / `sleep_stages` | nights and their deep / light / REM / awake segments |
-| `exercise_sessions` | workouts with duration, distance, calories, avg / max HR; laps, segments and effort in `meta` |
-| `exercise_routes` | GPS points recorded during workouts |
+## Settings
 
-## Notes
+All optional, in `web/.env.local`:
 
-- `npm run dev` listens on all interfaces so the phone can reach `/api/ingest`. The dashboard and
-  assistant aren't password-protected, so anyone on your home network can open them.
-  Ingest requires the token.
-- Some Samsung-only metrics (Energy Score, antioxidant index, vascular load, ECG) are not shared
-  with Health Connect; a few may appear in the CSV export.
+| Setting | What it does | Default |
+|---|---|---|
+| `STEPS_GOAL` | Daily steps goal | 10000 |
+| `SLEEP_GOAL_HOURS` | Nightly sleep goal | 8 |
+| `EXERCISE_GOAL_MIN` | Daily exercise goal | 30 |
+| `MAX_HR` | Max heart rate, for heart-rate zones | Highest recorded in a workout |
+| `HEIGHT_CM` | Your height, to estimate walking distance from steps | 0.76 m stride |
+| `ANTHROPIC_API_KEY` | Use the Anthropic API for Ask instead of Claude Code | Not set |
+| `HEALTH_DB_PATH` | Where the database lives | `data/health.db` |
 
-## Scores
+## Privacy and security
 
-All three are 0-100 (85+ excellent, 70-84 good, 55-69 fair, below 55 low) and are weighted
-averages of named parts, each scored 0-100, so the dashboard can always show why a score is what
-it is. Personal parts compare against your own 30-day usual. The rules live in
-`web/src/lib/scores.ts`; they are this dashboard's heuristics, not Samsung's or medical measures.
+- Your data stays in `data/` on your computer, and git ignores that folder.
+- The dashboard has no login. Anyone on your home network, or your tailnet, can open it. Watch Sync needs
+  the `INGEST_TOKEN` to send data.
+- The only data that leaves your computer is what the assistant reads while answering a question.
+
+## Good to know
+
+- **Not medical advice.** The scores are this project's own estimates, not Samsung's and not medical measurements.
+- **Some metrics aren't available.** Samsung Health doesn't share resting heart rate, HRV, Energy Score or ECG
+  with Health Connect. Resting heart rate is worked out from your heart rate while asleep, and there's no HRV.
+- **Distance is estimated.** Samsung only shares distance for workouts, so daily distance also counts steps × stride length.
+- **Auto-detected workouts** (short walks and "other" activities) are hidden on the Workouts page by default,
+  but they still count as exercise.
+
+<details>
+<summary><strong>How the scores work</strong></summary>
+
+All three are 0–100: 85+ excellent, 70–84 good, 55–69 fair, below 55 low. Each is a weighted average of
+named parts, so the dashboard can always show what pulled a score down. Parts marked "vs usual" compare
+against your own last 30 days. The rules are in `web/src/lib/scores.ts`.
 
 | Score | Parts (weight) |
 |---|---|
@@ -158,5 +195,34 @@ it is. Personal parts compare against your own 30-day usual. The rules live in
 | **Energy** (each morning) | last night's sleep (30), resting HR vs usual (25), 7-night sleep balance (15), recovery from training load (20), bedtime consistency (10). A resting HR 5+ bpm above usual caps the score. |
 | **Activity** (per day) | steps vs goal (60), exercise over the last 7 days vs 150 min (30), exercise today (10) |
 
-Resting heart rate is derived from sleep: the lowest 30-minute average while asleep. Samsung
-Health doesn't share resting HR or HRV with Health Connect, so there is no HRV anywhere.
+Resting heart rate is your lowest 30-minute average heart rate while asleep.
+
+</details>
+
+<details>
+<summary><strong>Database tables</strong></summary>
+
+| Table | Holds |
+|---|---|
+| `samples` | One row per measurement: heart rate, SpO₂, weight, body composition, blood pressure, VO₂ max, workout speed, cadence, power and elevation, hydration, nutrition, … |
+| `daily_metrics` | Daily totals for steps, distance, calories and floors, de-duplicated across phone and watch |
+| `sleep_sessions` / `sleep_stages` | Nights, and their deep, light, REM and awake segments |
+| `exercise_sessions` | Workouts with duration, distance, calories and average/max heart rate |
+| `exercise_routes` | GPS points recorded during workouts |
+
+Saved Ask conversations are in a separate file next to the database (`health-chats.db`).
+
+</details>
+
+<details>
+<summary><strong>Watch Sync details</strong></summary>
+
+The first sync, and **Re-sync last 30 days**, start 30 days back. Later syncs start from the last sync,
+with a 2-day overlap to catch data the watch delivered late. Samsung's export CSV columns aren't formally
+documented, so if a metric is missing after importing, add a handler in `web/scripts/import-shealth.ts`.
+
+</details>
+
+## License
+
+[MIT](LICENSE)
