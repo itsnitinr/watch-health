@@ -347,7 +347,7 @@ export function Chat({ initialQuestion }: { initialQuestion?: string }) {
   }, [initialQuestion]);
 
   return (
-    <div className="flex h-[100dvh] flex-col md:h-full">
+    <div className="flex h-[calc(100dvh-var(--bottom-nav))] flex-col md:h-full">
       <PageHeader title="Ask" subtitle="Questions answered from your own watch data">
         {threads.length > 0 && (
           <DropdownMenu>

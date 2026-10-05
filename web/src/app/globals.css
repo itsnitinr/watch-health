@@ -237,3 +237,7 @@
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text { animation: none; color: var(--muted-foreground); background: none; }
 }
+
+/* Height of the phone tab bar (components/bottom-nav.tsx); pages pad their bottom by it. No tab bar from md up. */
+:root { --bottom-nav: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+@media (width >= 48rem) { :root { --bottom-nav: 0px; } }

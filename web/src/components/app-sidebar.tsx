@@ -1,23 +1,14 @@
 "use client";
 
-import { Activity, BedDouble, Dumbbell, HeartPulse, RefreshCw, Sparkles, Sun, TrendingUp, Watch } from "lucide-react";
+import { RefreshCw, Watch } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NAV } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar,
 } from "@/components/ui/sidebar";
-
-const NAV = [
-  { href: "/", label: "Today", icon: Sun, color: "text-foreground", match: (p: string) => p === "/" || p.startsWith("/day/") },
-  { href: "/activity", label: "Activity", icon: Activity, color: "text-activity", match: (p: string) => p.startsWith("/activity") },
-  { href: "/sleep", label: "Sleep", icon: BedDouble, color: "text-sleep", match: (p: string) => p.startsWith("/sleep") },
-  { href: "/heart", label: "Heart & body", icon: HeartPulse, color: "text-heart", match: (p: string) => p.startsWith("/heart") },
-  { href: "/workouts", label: "Workouts", icon: Dumbbell, color: "text-exercise", match: (p: string) => p.startsWith("/workouts") },
-  { href: "/trends", label: "Trends", icon: TrendingUp, color: "text-foreground", match: (p: string) => p.startsWith("/trends") },
-  { href: "/chat", label: "Ask", icon: Sparkles, color: "text-foreground", match: (p: string) => p.startsWith("/chat") },
-];
 
 export function AppSidebar({ lastSync }: { lastSync: string | null }) {
   const pathname = usePathname();

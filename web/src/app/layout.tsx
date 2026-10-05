@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
 import { AppSidebar } from "@/components/app-sidebar";
+import { BottomNav } from "@/components/bottom-nav";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,6 +23,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Lets the page reach under Android's gesture bar; the tab bar pads itself with env(safe-area-inset-bottom).
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
     { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
@@ -31,14 +34,16 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   await connection();
   const last = dataCoverage().lastAndroidSync;
+  const lastSync = last ? fmtAgo(Date.parse(last), nowMs()) : null;
   return (
     <html lang="en" suppressHydrationWarning className={cn("antialiased", geist.variable, geistMono.variable)}>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider delayDuration={200}>
             <SidebarProvider>
-              <AppSidebar lastSync={last ? fmtAgo(Date.parse(last), nowMs()) : null} />
-              <SidebarInset className="md:h-[calc(100svh-1rem)] md:overflow-y-auto md:border">{children}</SidebarInset>
+              <AppSidebar lastSync={lastSync} />
+              <SidebarInset className="pb-(--bottom-nav) md:h-[calc(100svh-1rem)] md:overflow-y-auto md:border md:pb-0">{children}</SidebarInset>
+              <BottomNav lastSync={lastSync} />
             </SidebarProvider>
           </TooltipProvider>
         </ThemeProvider>
