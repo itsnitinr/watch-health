@@ -567,6 +567,51 @@ export function personalBests() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Weight
+
+/** Body composition readings shown on the Weight page, when there are any. */
+export const BODY_COMPOSITION = [
+  { type: "body_fat", label: "Body fat", unit: "%" },
+  { type: "skeletal_muscle_mass", label: "Skeletal muscle", unit: "kg" },
+  { type: "lean_body_mass", label: "Lean mass", unit: "kg" },
+  { type: "body_water_mass", label: "Body water", unit: "kg" },
+  { type: "bone_mass", label: "Bone mass", unit: "kg" },
+] as const;
+
+export type WeighIn = { t: number; day: string; kg: number; fat: number | null; source: string | null; trend: number };
+
+/** Days for the trend to mostly catch up with a new level of weight. */
+const TREND_TAU_DAYS = 10;
+
+/**
+ * Every weigh-in, oldest first, with body fat from the same measurement and a smoothed trend.
+ * Daily weight swings by a kilo or more with water and food, so the trend is what to read: an
+ * exponential moving average weighted by the time between weigh-ins (about 10% per day when
+ * weighing daily, and nearly the new reading after a long gap).
+ */
+export function weighIns(): WeighIn[] {
+  const rows = all<{ t: number; kg: number; fat: number | null; source: string | null }>(
+    `SELECT w.start_ms AS t, AVG(w.value) AS kg, MAX(w.source) AS source,
+       (SELECT AVG(f.value) FROM samples f WHERE f.type = 'body_fat' AND f.start_ms = w.start_ms) AS fat
+     FROM samples w WHERE w.type = 'weight' GROUP BY w.start_ms ORDER BY w.start_ms`,
+  );
+  let trend: number | null = null;
+  let prevT = 0;
+  return rows.map((r) => {
+    const alpha = trend == null ? 1 : 1 - Math.exp(-(r.t - prevT) / 86400000 / TREND_TAU_DAYS);
+    trend = trend == null ? r.kg : trend + alpha * (r.kg - trend);
+    prevT = r.t;
+    return { ...r, day: localDay(r.t), trend };
+  });
+}
+
+/** Height in metres, from HEIGHT_CM or the latest synced height. */
+export function heightM(): number | null {
+  if (Number(process.env.HEIGHT_CM) > 0) return Number(process.env.HEIGHT_CM) / 100;
+  return one<{ value: number }>(`SELECT value FROM samples WHERE type = 'height' ORDER BY start_ms DESC LIMIT 1`)?.value ?? null;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Today view
 
 export const GOALS = {

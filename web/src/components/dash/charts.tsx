@@ -102,10 +102,10 @@ export function DailyColumns({
 
 /** Daily values as quiet dots with the 7-day average as the line to read. */
 export function TrendChart({
-  data, label, color, digits = 0, format = "number", hrefPrefix, height = 220, goal,
+  data, label, color, digits = 0, format = "number", hrefPrefix, height = 220, goal, avgLabel,
 }: {
   data: { day: string; value: number | null; avg: number | null }[]; label: string; color: string; digits?: number;
-  format?: ValueFormat; hrefPrefix?: string; height?: number; goal?: number;
+  format?: ValueFormat; hrefPrefix?: string; height?: number; goal?: number; avgLabel?: string;
 }) {
   const onClick = useDayClick(hrefPrefix);
   const gid = useId().replace(/:/g, "");
@@ -114,10 +114,13 @@ export function TrendChart({
   const hourTicks = format === "minutes" && vals.length
     ? Array.from({ length: Math.ceil(Math.max(...vals) / 60) - Math.floor(Math.min(...vals) / 60) + 1 }, (_, i) => (Math.floor(Math.min(...vals) / 60) + i) * 60)
     : undefined;
+  // Values too close to tell apart at this precision would give an axis of identical labels; give them a band to sit in
+  const flat = !hourTicks && vals.length > 0 && Math.max(...vals) - Math.min(...vals) < 5 * 10 ** -digits;
+  const pad = digits > 0 ? 1 : 3; // axis steps of 1, or 3 for whole-number counts
   return (
     <div className="space-y-2">
       <Legend items={[
-        { label: "7-day average", color, shape: "line" },
+        { label: avgLabel ?? "7-day average", color, shape: "line" },
         { label: "Each day", color: "var(--chart-ink)", shape: "dot" },
       ]} />
       <ResponsiveContainer width="100%" height={height}>
@@ -131,7 +134,7 @@ export function TrendChart({
           {GRID}
           <XAxis dataKey="day" {...AXIS} tickFormatter={fmtDay} minTickGap={32} />
           <YAxis {...AXIS} axisLine={false} width={40} tickFormatter={(v) => fmtTick(v, format, digits)}
-            domain={hourTicks ? [hourTicks[0], hourTicks.at(-1)!] : ["auto", "auto"]} ticks={hourTicks} />
+            domain={hourTicks ? [hourTicks[0], hourTicks.at(-1)!] : flat ? [Math.round(vals[0]) - 2 * pad, Math.round(vals[0]) + 2 * pad] : ["auto", "auto"]} ticks={hourTicks} />
           <Tooltip
             cursor={{ stroke: "var(--chart-axis)", strokeWidth: 1 }}
             content={({ active, payload }: TooltipContentProps) => {
@@ -140,7 +143,7 @@ export function TrendChart({
               return (
                 <TooltipBox title={fmtDay(p.day)} hint={hrefPrefix ? "Click to open this day" : undefined} rows={[
                   ...(p.value != null ? [{ label, value: fmtValue(p.value, format, digits), color: "var(--chart-ink)" }] : []),
-                  ...(p.avg != null ? [{ label: "7-day avg", value: fmtValue(p.avg, format, digits), color }] : []),
+                  ...(p.avg != null ? [{ label: avgLabel ?? "7-day avg", value: fmtValue(p.avg, format, digits), color }] : []),
                 ]} />
               );
             }}

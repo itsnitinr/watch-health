@@ -1,4 +1,4 @@
-import { Activity, Droplets, Gauge, HeartPulse, Percent, Scale, Thermometer, Wind } from "lucide-react";
+import { Activity, Droplets, Gauge, HeartPulse, Scale, Thermometer, Wind } from "lucide-react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { DailyLine, HeartRangeChart, TrendChart } from "@/components/dash/charts";
@@ -38,7 +38,6 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
   const resp = fillDays(range, dailySampleStats("respiratory_rate", range), (r) => r.avg);
   const skin = fillDays(range, dailySampleStats("skin_temperature_delta", range), (r) => r.avg);
   const weight = fillDays(range, dailySampleStats("weight", range), (r) => r.avg);
-  const fat = fillDays(range, dailySampleStats("body_fat", range), (r) => r.avg);
   const has = (s: { value: number | null }[]) => s.some((p) => p.value != null);
 
   const rhrPrev = mean(restingHeartRate(prev).map((r) => r.value));
@@ -57,7 +56,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
 
   return (
     <>
-      <PageHeader title="Heart & body" subtitle="Heart rate, cardio fitness, blood oxygen and body measurements">
+      <PageHeader title="Heart & body" subtitle="Heart rate, cardio fitness and blood oxygen">
         <SegmentedLinks options={RANGES} current={rangeKey} href={(v) => `/heart?range=${v}`} />
       </PageHeader>
       <PageBody>
@@ -68,7 +67,7 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
             footer={<Delta value={mean(vo2.map((r) => r.value))} reference={vo2Prev} upIsGood format={(x) => x.toFixed(1)} suffix="vs previous" threshold={0.01} />} />
           <StatTile label="Blood oxygen" icon={Droplets} domain="body" value={mean(spo2.map((r) => r.value)) != null ? mean(spo2.map((r) => r.value))!.toFixed(1) : "-"} unit="% avg"
             footer={<Delta value={mean(spo2.map((r) => r.value))} reference={spo2Prev} upIsGood format={(x) => `${x.toFixed(1)} pts`} suffix="vs previous" threshold={0.005} />} />
-          <StatTile label="Weight" icon={Scale} domain="body" value={weights.length ? weights.at(-1)!.value!.toFixed(1) : "-"} unit="kg"
+          <StatTile label="Weight" icon={Scale} domain="body" href="/body" value={weights.length ? weights.at(-1)!.value!.toFixed(1) : "-"} unit="kg"
             footer={weightChange != null ? (
               <span className="text-xs text-muted-foreground">
                 {weightChange === 0 ? "No change" : `${weightChange > 0 ? "+" : ""}${weightChange.toFixed(1)} kg`} over this period
@@ -104,15 +103,6 @@ export default async function HeartPage({ searchParams }: PageProps<"/heart">) {
           {has(skin) && (
             <Panel title="Skin temperature" icon={Thermometer} domain="body" description="Change from your baseline, °C">
               <DailyLine data={skin} label="°C" color="var(--body)" digits={2} hrefPrefix="/day/" />
-            </Panel>
-          )}
-          <Panel title="Weight" icon={Scale} domain="body" description="From your watch's body composition or a connected scale">
-            {has(weight) ? <TrendChart data={withRollingAvg(weight)} label="kg" color="var(--body)" digits={1} hrefPrefix="/day/" />
-              : <EmptyHint icon={Scale} title="No weight measurements" />}
-          </Panel>
-          {has(fat) && (
-            <Panel title="Body fat" icon={Percent} domain="body" description="Percentage, from body composition measurements">
-              <DailyLine data={fat} label="%" color="var(--body)" digits={1} hrefPrefix="/day/" />
             </Panel>
           )}
         </div>

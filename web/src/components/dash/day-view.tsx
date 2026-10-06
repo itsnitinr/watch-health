@@ -163,7 +163,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
             footer={d.spo2 ? <span className="text-xs text-muted-foreground">usual {base.spo2 != null ? `${base.spo2.toFixed(1)}%` : "-"}</span> : <span className="text-xs text-muted-foreground">No reading</span>}>
             <Sparkline values={week.spo2.map((x) => x.value)} color="var(--body)" />
           </StatTile>
-          <StatTile label="Weight" icon={Scale} domain="body" value={d.weight ? d.weight.avg.toFixed(1) : base.weight != null ? base.weight.toFixed(1) : "-"} unit="kg" href="/heart"
+          <StatTile label="Weight" icon={Scale} domain="body" value={d.weight ? d.weight.avg.toFixed(1) : base.weight != null ? base.weight.toFixed(1) : "-"} unit="kg" href="/body"
             footer={<span className="text-xs text-muted-foreground">{d.weight ? "Measured this day" : base.weight != null ? "Last measurement" : "No measurements"}</span>}>
             <Sparkline values={week.weight.map((x) => x.value)} color="var(--body)" />
           </StatTile>

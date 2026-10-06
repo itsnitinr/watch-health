@@ -14,7 +14,7 @@ It runs on your own computer. Your health data stays there; nothing is uploaded 
 ## What you get
 
 - **Today:** daily scores for energy, sleep and strain, goal rings, and how today compares with your usual
-- **Activity, Sleep, Heart & body, Workouts:** charts for 30 days up to a year, with personal bests
+- **Activity, Sleep, Heart & body, Body, Workouts:** charts for 30 days up to a year, with personal bests
 - **Trends:** the last 30 days against the 30 before, and a month-by-month table
 - **Ask:** an assistant (Claude) that looks up your data to answer questions like "Do I sleep better on days I work out?"
 - **A phone app:** install it from Chrome on Android, with bottom tabs, haptics and light/dark mode
