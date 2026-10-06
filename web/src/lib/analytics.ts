@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { dailyMetric, dailySampleStats, listDays, sleepNights, type Range, type SleepNight } from "./queries";
+import { setting } from "./settings";
 import { activityScore, energyScore, sleepScore, strainScore, type Score, type ScorePart } from "./scores";
 
 // node:sqlite rows have a null prototype; copy them into plain objects so they can be
@@ -23,7 +24,8 @@ export const shiftDay = (day: string, n: number) => {
   return d.toLocaleDateString("sv");
 };
 
-export const SLEEP_GOAL_MIN = Number(process.env.SLEEP_GOAL_HOURS ?? 8) * 60;
+/** Nightly sleep goal in minutes. */
+export const sleepGoalMin = () => setting("sleepGoalHours")! * 60;
 
 // ---------------------------------------------------------------------------------------------
 // Series helpers
@@ -71,10 +73,13 @@ export function dataExtent() {
 // Distance
 
 /**
- * Walking stride length in metres: 0.415 x height when HEIGHT_CM is set (a standard estimate),
+ * Walking stride length in metres: 0.415 x height when it's known (a standard estimate),
  * otherwise 0.76 m, a typical adult stride.
  */
-export const STRIDE_M = Number(process.env.HEIGHT_CM) > 0 ? (Number(process.env.HEIGHT_CM) * 0.415) / 100 : 0.76;
+export const strideM = () => {
+  const h = heightM();
+  return h ? h * 0.415 : 0.76;
+};
 
 /**
  * Daily distance. Samsung Health only shares workout distance with Health Connect, not all-day
@@ -83,8 +88,9 @@ export const STRIDE_M = Number(process.env.HEIGHT_CM) > 0 ? (Number(process.env.
  */
 export function dailyDistance(r: Range) {
   const recorded = new Map(dailyMetric("distance_m", r).map((x) => [x.day, x.value]));
+  const stride = strideM();
   return dailyMetric("steps", r).map(({ day, value: steps }) => {
-    const fromSteps = steps * STRIDE_M;
+    const fromSteps = steps * stride;
     const rec = recorded.get(day) ?? 0;
     return { day, value: Math.max(rec, fromSteps), estimated: fromSteps > rec };
   });
@@ -310,6 +316,7 @@ const median = (xs: number[]) => {
  */
 export function nights(r: Range): NightStats[] {
   const all = mergedNights({ from: shiftDay(r.from, -30), to: r.to });
+  const goalMin = sleepGoalMin();
   return all.flatMap((n, i) => {
     if (n.day < r.from) return [];
     const windowStart = shiftDay(n.day, -30);
@@ -317,7 +324,7 @@ export function nights(r: Range): NightStats[] {
     const usualBedMin = prior.length >= 5 ? median(prior) : null;
     const sc = sleepScore({
       asleep: n.asleep, inBed: n.total_min, deep: n.deep, rem: n.rem, light: n.light,
-      bedMin: n.bedMin, usualBedMin, goalMin: SLEEP_GOAL_MIN,
+      bedMin: n.bedMin, usualBedMin, goalMin,
     });
     return [{ ...n, score: sc.score, scoreParts: sc.parts, bedOffMin: usualBedMin == null ? null : Math.abs(n.bedMin - usualBedMin) }];
   });
@@ -334,6 +341,7 @@ export function sleepSummary(ns: NightStats[]) {
   const withStages = ns.filter((n) => n.deep + n.rem + n.light > 0);
   const stageTotal = withStages.reduce((a, n) => a + n.deep + n.rem + n.light, 0);
   const last14 = ns.slice(-14);
+  const goalMin = sleepGoalMin();
   const group = (xs: NightStats[]) => ({
     nights: xs.length,
     asleep: pick((n) => n.asleep, xs),
@@ -360,7 +368,7 @@ export function sleepSummary(ns: NightStats[]) {
         }
       : null,
     /** Net shortfall against the goal over the last 14 nights (surplus nights pay some back). */
-    debtMin: Math.max(0, last14.reduce((a, n) => a + (SLEEP_GOAL_MIN - n.asleep), 0)),
+    debtMin: Math.max(0, last14.reduce((a, n) => a + (goalMin - n.asleep), 0)),
     debtNights: last14.length,
     weekday: group(ns.filter((n) => !n.weekend)),
     weekend: group(ns.filter((n) => n.weekend)),
@@ -405,14 +413,19 @@ export function workout(uid: string) {
 }
 
 /**
- * Max heart rate for zones: MAX_HR from the environment, else the highest workout max HR on
- * record (ignoring implausible spikes), else 190.
+ * Max heart rate for zones: your setting, else the highest workout max HR on record (ignoring
+ * implausible spikes), else 190.
  */
-export function maxHeartRate(): { value: number; source: "env" | "observed" | "default" } {
-  const env = Number(process.env.MAX_HR);
-  if (env > 0) return { value: env, source: "env" };
-  const r = one<{ m: number | null }>(`SELECT MAX(max_hr) AS m FROM exercise_sessions WHERE max_hr BETWEEN 120 AND 220`);
-  return r?.m ? { value: r.m, source: "observed" } : { value: 190, source: "default" };
+export function maxHeartRate(): { value: number; source: "setting" | "observed" | "default" } {
+  const set = setting("maxHr");
+  if (set) return { value: set, source: "setting" };
+  const observed = observedMaxHr();
+  return observed ? { value: observed, source: "observed" } : { value: 190, source: "default" };
+}
+
+/** Highest workout max HR on record, ignoring implausible spikes. */
+export function observedMaxHr(): number | null {
+  return one<{ m: number | null }>(`SELECT MAX(max_hr) AS m FROM exercise_sessions WHERE max_hr BETWEEN 120 AND 220`)?.m ?? null;
 }
 
 /** Typical resting HR (median of the last 60 days), used as the floor for training load. */
@@ -605,20 +618,25 @@ export function weighIns(): WeighIn[] {
   });
 }
 
-/** Height in metres, from HEIGHT_CM or the latest synced height. */
+/** Height in metres, from your setting or the latest synced height. */
 export function heightM(): number | null {
-  if (Number(process.env.HEIGHT_CM) > 0) return Number(process.env.HEIGHT_CM) / 100;
+  const cm = setting("heightCm");
+  return cm ? cm / 100 : syncedHeightM();
+}
+
+/** The latest height synced from your phone, in metres. */
+export function syncedHeightM(): number | null {
   return one<{ value: number }>(`SELECT value FROM samples WHERE type = 'height' ORDER BY start_ms DESC LIMIT 1`)?.value ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Today view
 
-export const GOALS = {
-  steps: Number(process.env.STEPS_GOAL ?? 10000),
-  sleepMin: SLEEP_GOAL_MIN,
-  exerciseMin: Number(process.env.EXERCISE_GOAL_MIN ?? 30),
-};
+export const goals = () => ({
+  steps: setting("stepsGoal")!,
+  sleepMin: sleepGoalMin(),
+  exerciseMin: setting("exerciseGoalMin")!,
+});
 
 const avgOf = (xs: (number | null | undefined)[]) => {
   const v = xs.filter((x): x is number => x != null);
@@ -708,6 +726,7 @@ export function dailyScores(r: Range, { withStrain = false } = {}): Map<string, 
   const rhr = new Map(restingHeartRate(hist).map((x) => [x.day, x.value]));
   const steps = new Map(dailyMetric("steps", r).map((x) => [x.day, x.value]));
   const maxHr = maxHeartRate().value;
+  const g = goals();
   const restHr = baselineRestingHr();
   const load = new Map<string, number>();
   const exMin = new Map<string, number>();
@@ -744,7 +763,7 @@ export function dailyScores(r: Range, { withStrain = false } = {}): Map<string, 
         restingHr: rhr.get(day) ?? null,
         restingHrUsual: prevRhr.length >= 7 ? prevRhr.reduce((a, b) => a + b, 0) / prevRhr.length : null,
         avgAsleep7: week.length >= 3 ? week.reduce((a, b) => a + b, 0) / week.length : null,
-        goalMin: SLEEP_GOAL_MIN,
+        goalMin: g.sleepMin,
         loadYesterday: load.get(yesterday) ?? 0,
         loadAcute: sumDays(load, yesterday, 7) / 7,
         loadChronic: sumDays(load, yesterday, 28) / 28,
@@ -760,9 +779,9 @@ export function dailyScores(r: Range, { withStrain = false } = {}): Map<string, 
       }) : null,
       activity: activityScore({
         steps: steps.get(day) ?? null,
-        stepGoal: GOALS.steps,
+        stepGoal: g.steps,
         exerciseMin: exMin.get(day) ?? 0,
-        exerciseGoal: GOALS.exerciseMin,
+        exerciseGoal: g.exerciseMin,
         weekExerciseMin: sumDays(exMin, day, 7),
       }),
     });

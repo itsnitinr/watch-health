@@ -12,7 +12,7 @@ import { DayDetail } from "@/components/dash/day-detail";
 import { ScoreHelp, ScoreSummaries, type ScoreSummary } from "@/components/dash/score";
 import { ENERGY_ADVICE, SCORE_HELP, SLEEP_ADVICE, band, strainBand, strainTarget } from "@/lib/scores";
 import {
-  GOALS, baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, latestDataDay, maxHeartRate, recentSeries, shiftDay,
+  baselineRestingHr, baselines, dailyScores, dataDays, dayDetail, goals, latestDataDay, maxHeartRate, recentSeries, shiftDay,
   trainingLoad, vo2History,
 } from "@/lib/analytics";
 import { fmtClock, fmtLongDay, fmtMinutes, fmtNum, fmtPace, titleCase } from "@/lib/format";
@@ -33,6 +33,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   const rhr = d.restingHr;
   const exerciseMin = d.workouts.reduce((a, w) => a + (w.end_ms - w.start_ms) / 60000, 0);
   const maxHr = maxHeartRate().value;
+  const g = goals();
   const restHr = baselineRestingHr();
   const hasAny = d.steps != null || n != null || d.hr.length > 0 || d.workouts.length > 0;
   const latest = hasAny ? null : latestDataDay();
@@ -68,9 +69,9 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
   const vo2Latest = vo2.at(-1) ?? null;
 
   const rings = [
-    { label: "Steps", value: d.steps ?? 0, goal: GOALS.steps, color: "var(--activity)", display: fmtNum(d.steps ?? 0), goalDisplay: fmtNum(GOALS.steps), icon: Footprints, domain: "activity" as const },
-    { label: "Sleep", value: asleep ?? 0, goal: GOALS.sleepMin, color: "var(--sleep)", display: asleep != null ? fmtMinutes(asleep) : "-", goalDisplay: fmtMinutes(GOALS.sleepMin), icon: BedDouble, domain: "sleep" as const },
-    { label: "Exercise", value: exerciseMin, goal: GOALS.exerciseMin, color: "var(--exercise)", display: `${Math.round(exerciseMin)} min`, goalDisplay: `${GOALS.exerciseMin} min`, icon: Dumbbell, domain: "exercise" as const },
+    { label: "Steps", value: d.steps ?? 0, goal: g.steps, color: "var(--activity)", display: fmtNum(d.steps ?? 0), goalDisplay: fmtNum(g.steps), icon: Footprints, domain: "activity" as const },
+    { label: "Sleep", value: asleep ?? 0, goal: g.sleepMin, color: "var(--sleep)", display: asleep != null ? fmtMinutes(asleep) : "-", goalDisplay: fmtMinutes(g.sleepMin), icon: BedDouble, domain: "sleep" as const },
+    { label: "Exercise", value: exerciseMin, goal: g.exerciseMin, color: "var(--exercise)", display: `${Math.round(exerciseMin)} min`, goalDisplay: `${g.exerciseMin} min`, icon: Dumbbell, domain: "exercise" as const },
   ];
 
   const hrTo = isToday ? Math.min(d.end, now) : d.end;
@@ -216,7 +217,7 @@ export function DayView({ day, today, now }: { day: string; today: string; now: 
         {/* Week context, workouts, ask */}
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <Panel title="Steps this week" icon={Footprints} domain="activity" description={`Average ${fmtNum(base.steps ?? 0)} a day over the last 30 days`}>
-            <DailyColumns data={week.steps} label="steps" color="var(--activity)" goal={GOALS.steps} hrefPrefix="/day/" height={170} highlight={day} />
+            <DailyColumns data={week.steps} label="steps" color="var(--activity)" goal={g.steps} hrefPrefix="/day/" height={170} highlight={day} />
           </Panel>
 
           <Panel title="Workouts" icon={Dumbbell} domain="exercise"

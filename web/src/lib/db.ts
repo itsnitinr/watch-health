@@ -75,6 +75,12 @@ CREATE TABLE IF NOT EXISTS exercise_routes (
   PRIMARY KEY (session_uid, t)
 );
 
+-- Settings edited on the Settings page (goals, height, max heart rate); see lib/settings.ts.
+CREATE TABLE IF NOT EXISTS settings (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sync_state (
   key    TEXT PRIMARY KEY,
   value  TEXT NOT NULL

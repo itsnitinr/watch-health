@@ -85,7 +85,7 @@ export default async function BodyPage({ searchParams }: PageProps<"/body">) {
               footer={<span className="text-xs text-muted-foreground">From your trend weight · 18.5–24.9 is the usual healthy range</span>} />
           ) : (
             <StatTile label="Weigh-ins" icon={ListOrdered} domain="body" value={inRange.length} unit="this period"
-              footer={<span className="text-xs text-muted-foreground">Set HEIGHT_CM to see BMI</span>} />
+              footer={<span className="text-xs text-muted-foreground">Set your height in Settings to see BMI</span>} />
           )}
         </div>
 

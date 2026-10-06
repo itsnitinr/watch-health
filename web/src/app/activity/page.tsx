@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { CalendarHeatmap, DailyColumns, TrendChart } from "@/components/dash/charts";
 import { Delta, EmptyHint, Panel, SegmentedLinks, StatTile } from "@/components/dash/primitives";
 import { PageBody, PageHeader } from "@/components/page-header";
-import { GOALS, STRIDE_M, bucketAvg, dailyDistance, dailyScores, dataExtent, fillDays, shiftDay, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { bucketAvg, dailyDistance, dailyScores, dataExtent, fillDays, goals, heightM, shiftDay, strideM, todayLocal, withRollingAvg } from "@/lib/analytics";
 import { ScoreHelp } from "@/components/dash/score";
 import { SCORE_HELP } from "@/lib/scores";
 import { fmtDay, fmtNum, fmtPeriod } from "@/lib/format";
@@ -46,6 +46,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
   const prev = { from: shiftDay(range.from, -days), to: shiftDay(range.from, -1) };
 
   const steps = fillDays(range, dailyMetric("steps", range), (r) => r.value);
+  const stepsGoal = goals().steps;
   const distance = fillDays(range, dailyDistance(range), (r) => r.value);
   const active = fillDays(range, dailyMetric("active_kcal", range), (r) => r.value);
   const prevSteps = dailyMetric("steps", prev).map((r) => r.value);
@@ -55,7 +56,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
   const recorded = steps.filter((s) => s.value != null);
   const scores = dailyScores(range);
   const activityScores = [...scores.values()].map((x) => ({ day: x.day, value: steps.find((s) => s.day === x.day)?.value != null ? x.activity.score : null }));
-  const goalDays = recorded.filter((s) => s.value! >= GOALS.steps).length;
+  const goalDays = recorded.filter((s) => s.value! >= stepsGoal).length;
   const best = [...recorded].sort((a, b) => b.value! - a.value!).slice(0, 5);
 
   // Average steps by weekday (Monday first)
@@ -68,7 +69,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
   // Longest run of consecutive days meeting the goal, ending at the most recent such streak
   let streak = 0, bestStreak = 0;
   for (const s of steps) {
-    streak = s.value != null && s.value >= GOALS.steps ? streak + 1 : 0;
+    streak = s.value != null && s.value >= stepsGoal ? streak + 1 : 0;
     bestStreak = Math.max(bestStreak, streak);
   }
 
@@ -97,13 +98,13 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
             </div>
 
             <Panel title="Steps calendar" icon={CalendarDays} domain="activity"
-              description={`Darker means more steps. Outlined days met your ${fmtNum(GOALS.steps)} step goal. Click a day to open it.`}>
-              <CalendarHeatmap days={steps} label="steps" hrefPrefix="/day/" goal={GOALS.steps} />
+              description={`Darker means more steps. Outlined days met your ${fmtNum(stepsGoal)} step goal. Click a day to open it.`}>
+              <CalendarHeatmap days={steps} label="steps" hrefPrefix="/day/" goal={stepsGoal} />
             </Panel>
 
             <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
               <Panel title="Daily steps" icon={Footprints} domain="activity" bodyClassName="flex flex-col [&>div]:flex-1">
-                <TrendChart data={withRollingAvg(steps)} label="steps" color="var(--activity)" hrefPrefix="/day/" goal={GOALS.steps} height={420} />
+                <TrendChart data={withRollingAvg(steps)} label="steps" color="var(--activity)" hrefPrefix="/day/" goal={stepsGoal} height={420} />
               </Panel>
               <div className="grid gap-4">
                 <Panel title="Best days" icon={Trophy} domain="activity">
@@ -142,7 +143,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
 
             <div className="grid gap-4 lg:grid-cols-2">
               <Panel title="Distance" icon={Route} domain="activity"
-                description={`Kilometres a day. Samsung only shares workout distance, so walking is estimated from steps (${STRIDE_M.toFixed(2)} m a step; set HEIGHT_CM for a better estimate).`}>
+                description={`Kilometres a day. Samsung only shares workout distance, so walking is estimated from steps (${strideM().toFixed(2)} m a step${heightM() ? ", from your height" : "; set your height in Settings for a better estimate"}).`}>
                 <TrendChart data={withRollingAvg(distance.map((d) => ({ day: d.day, value: d.value != null ? d.value / 1000 : null })))}
                   label="km" color="var(--activity)" digits={1} hrefPrefix="/day/" />
               </Panel>
@@ -156,7 +157,7 @@ export default async function ActivityPage({ searchParams }: PageProps<"/activit
             <Panel title={by === "week" ? "Weekly average" : "Monthly average"} icon={CalendarDays} domain="activity"
               description={`Average steps a day, ${by === "week" ? "each week (Monday to Sunday)" : "each month"}`}
               action={<SegmentedLinks options={BY} current={by} href={(v) => href({ by: v })} />}>
-              <DailyColumns data={bucketAvg(steps, by)} label="steps a day" color="var(--activity)" period={by} goal={GOALS.steps} height={220} />
+              <DailyColumns data={bucketAvg(steps, by)} label="steps a day" color="var(--activity)" period={by} goal={stepsGoal} height={220} />
             </Panel>
             <p className="text-center text-xs text-muted-foreground">Data from {fmtDay(recorded[0].day)} to {fmtDay(recorded.at(-1)!.day)}</p>
           </>

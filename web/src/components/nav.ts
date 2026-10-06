@@ -1,4 +1,4 @@
-import { Activity, BedDouble, Dumbbell, HeartPulse, Scale, Sparkles, Sun, TrendingUp } from "lucide-react";
+import { Activity, BedDouble, Dumbbell, HeartPulse, Scale, Settings, Sparkles, Sun, TrendingUp } from "lucide-react";
 
 /** Every page, in sidebar order. `tab` marks the ones that get their own bottom tab on a phone; the rest go under More. */
 export const NAV = [
@@ -10,4 +10,5 @@ export const NAV = [
   { href: "/workouts", label: "Workouts", icon: Dumbbell, color: "text-exercise", tab: false, match: (p: string) => p.startsWith("/workouts") },
   { href: "/trends", label: "Trends", icon: TrendingUp, color: "text-foreground", tab: false, match: (p: string) => p.startsWith("/trends") },
   { href: "/chat", label: "Ask", icon: Sparkles, color: "text-foreground", tab: false, match: (p: string) => p.startsWith("/chat") },
+  { href: "/settings", label: "Settings", icon: Settings, color: "text-foreground", tab: false, match: (p: string) => p.startsWith("/settings") },
 ];

@@ -154,17 +154,19 @@ anywhere.
 
 ## Settings
 
-All optional, in `web/.env.local`:
+Open **Settings** in the dashboard to set your goals (steps, sleep, exercise), your height and your max
+heart rate. Changes apply right away. Leave a field empty to use the default shown in it.
+
+The rest are in `web/.env.local` and need a restart:
 
 | Setting | What it does | Default |
 |---|---|---|
-| `STEPS_GOAL` | Daily steps goal | 10000 |
-| `SLEEP_GOAL_HOURS` | Nightly sleep goal | 8 |
-| `EXERCISE_GOAL_MIN` | Daily exercise goal | 30 |
-| `MAX_HR` | Max heart rate, for heart-rate zones | Highest recorded in a workout |
-| `HEIGHT_CM` | Your height, to estimate walking distance from steps | 0.76 m stride |
 | `ANTHROPIC_API_KEY` | Use the Anthropic API for Ask instead of Claude Code | Not set |
+| `INGEST_TOKEN` | Shared secret Watch Sync sends with each upload | Required |
 | `HEALTH_DB_PATH` | Where the database lives | `data/health.db` |
+
+`STEPS_GOAL`, `SLEEP_GOAL_HOURS`, `EXERCISE_GOAL_MIN`, `HEIGHT_CM` and `MAX_HR` still work in `.env.local`
+as defaults for the matching fields on the Settings page.
 
 ## Privacy and security
 

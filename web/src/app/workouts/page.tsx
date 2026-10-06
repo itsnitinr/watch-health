@@ -91,7 +91,7 @@ export default async function WorkoutsPage({ searchParams }: PageProps<"/workout
                   data={weekKeys.map((day) => ({ day, value: Math.round(weeks.get(day)?.load ?? 0) }))} />
               </Panel>
               <Panel title="Time in heart-rate zones" icon={Activity} domain="heart"
-                description={`All workouts in this period. Zones use a max heart rate of ${max.value} bpm (${max.source === "env" ? "set with MAX_HR" : max.source === "observed" ? "your highest recorded; override with MAX_HR" : "default; set MAX_HR"}).`}>
+                description={`All workouts in this period. Zones use a max heart rate of ${max.value} bpm (${max.source === "setting" ? "from Settings" : max.source === "observed" ? "your highest recorded; you can set it in Settings" : "a default; set yours in Settings"}).`}>
                 {totals.some((s) => s > 0) ? <ZoneBars seconds={totals} zones={zoneLabels(max.value)} />
                   : <EmptyHint icon={Activity} title="No heart-rate readings during workouts" />}
               </Panel>

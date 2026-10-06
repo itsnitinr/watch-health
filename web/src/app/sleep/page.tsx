@@ -9,7 +9,7 @@ import { StackedBar } from "@/components/dash/rings";
 import { ScoreDial, ScoreHelp, ScoreParts } from "@/components/dash/score";
 import { SCORE_HELP, type ScorePart } from "@/lib/scores";
 import { PageBody, PageHeader } from "@/components/page-header";
-import { SLEEP_GOAL_MIN, fillDays, nights, shiftDay, sleepSummary, todayLocal, withRollingAvg } from "@/lib/analytics";
+import { fillDays, sleepGoalMin, nights, shiftDay, sleepSummary, todayLocal, withRollingAvg } from "@/lib/analytics";
 import { fmtDay, fmtMinutes, fmtTimeOfNight } from "@/lib/format";
 import { listDays } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
   const rangeKey = RANGES.find((r) => r.value === sp.range)?.value ?? "30";
   const today = todayLocal();
   const range = { from: shiftDay(today, -(Number(rangeKey) - 1)), to: today };
+  const goalMin = sleepGoalMin();
   const ns = nights(range);
 
   const header = (
@@ -49,7 +50,7 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
   const midpoint = (g: { bedMin: number | null; wakeMin: number | null }) =>
     g.bedMin != null && g.wakeMin != null ? (g.bedMin + g.wakeMin) / 2 : null;
   const jetlag = midpoint(s.weekday) != null && midpoint(s.weekend) != null ? Math.abs(midpoint(s.weekend)! - midpoint(s.weekday)!) : null;
-  const goalNights = ns.filter((n) => n.asleep >= SLEEP_GOAL_MIN).length;
+  const goalNights = ns.filter((n) => n.asleep >= goalMin).length;
   // Average of each score part across the period, to show what drives the score
   const avgParts: ScorePart[] = (ns.find((n) => n.scoreParts.length)?.scoreParts ?? []).map((p) => {
     const vals = ns.map((n) => n.scoreParts.find((x) => x.key === p.key)?.score).filter((v): v is number => v != null);
@@ -66,7 +67,7 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
       <PageBody>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatTile label="Average time asleep" icon={Moon} domain="sleep" value={s.asleep != null ? fmtMinutes(s.asleep) : "-"}
-            footer={<span className="text-xs text-muted-foreground">{goalNights} of {ns.length} nights met your {fmtMinutes(SLEEP_GOAL_MIN)} goal</span>} />
+            footer={<span className="text-xs text-muted-foreground">{goalNights} of {ns.length} nights met your {fmtMinutes(goalMin)} goal</span>} />
           <StatTile label="Sleep debt" icon={Hourglass} domain="sleep" value={fmtMinutes(s.debtMin)}
             footer={<span className="text-xs text-muted-foreground">Net shortfall over the last {s.debtNights} nights</span>} />
           <StatTile label="Usual bedtime" icon={BedDouble} domain="sleep" value={s.bedMin != null ? fmtTimeOfNight(s.bedMin) : "-"}
@@ -90,9 +91,9 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <Panel title="Time asleep" icon={Moon} domain="sleep" description={`Each night, with the 7-day average. Goal ${fmtMinutes(SLEEP_GOAL_MIN)} (change with SLEEP_GOAL_HOURS).`}>
+          <Panel title="Time asleep" icon={Moon} domain="sleep" description={`Each night, with the 7-day average. Goal ${fmtMinutes(goalMin)}, which you can change in Settings.`}>
             <TrendChart data={withRollingAvg(fillDays(range, ns, (n) => n.asleep))} label="asleep" color="var(--sleep)" format="minutes"
-              hrefPrefix="/day/" goal={SLEEP_GOAL_MIN} height={240} />
+              hrefPrefix="/day/" goal={goalMin} height={240} />
           </Panel>
           <Panel title="Bedtime and wake time" icon={CalendarRange} domain="sleep" description="Each bar runs from falling asleep to waking up">
             <BedWakeChart hrefPrefix="/day/" height={268} data={days.map((day) => {
@@ -174,7 +175,7 @@ export default async function SleepPage({ searchParams }: PageProps<"/sleep">) {
                 {[...ns].reverse().map((n) => (
                   <tr key={n.uid} className="transition-colors hover:bg-muted/50">
                     <td className="px-2 py-1.5"><Link href={`/day/${n.day}`} className="font-medium hover:underline">{fmtDay(n.day)}</Link></td>
-                    <td className={cn("px-2 py-1.5 font-semibold", n.asleep >= SLEEP_GOAL_MIN && "text-sleep")}>{fmtMinutes(n.asleep)}</td>
+                    <td className={cn("px-2 py-1.5 font-semibold", n.asleep >= goalMin && "text-sleep")}>{fmtMinutes(n.asleep)}</td>
                     <td className="px-2 py-1.5">{fmtTimeOfNight(n.bedMin)}</td>
                     <td className="px-2 py-1.5">{fmtTimeOfNight(n.wakeMin)}</td>
                     <td className="px-2 py-1.5">{Math.round(n.efficiency * 100)}%</td>
